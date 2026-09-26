@@ -114,6 +114,24 @@ function safeString(value: unknown) {
     return typeof value === 'string' ? value.trim() : '';
 }
 
+// Extracts a short readable summary from a long treatment plan document
+function summarizePlan(plan: string): string {
+    if (!plan) return '';
+    let text = plan.trim();
+    // 1. Truncate at first real newline
+    const nlIdx = text.indexOf('\n');
+    if (nlIdx > 0 && nlIdx < 200) text = text.slice(0, nlIdx).trim();
+    // 2. Truncate at first 'SECTION' keyword (section body starts here)
+    const secIdx = text.indexOf('SECTION');
+    if (secIdx > 0 && secIdx < 300) text = text.slice(0, secIdx).trim();
+    // 3. Truncate at first pipe separator (e.g. "Date Initiated: ... | Clinician: ...")
+    const pipeIdx = text.indexOf('|');
+    if (pipeIdx > 0 && pipeIdx < 300) text = text.slice(0, pipeIdx).trim();
+    // 4. Absolute cap at 130 characters
+    if (text.length > 130) text = text.slice(0, 127).trim() + '...';
+    return text;
+}
+
 function isOncologyText(value: unknown) {
     const text = safeString(value).toLowerCase();
     return ONCOLOGY_TERMS.some(term => text.includes(term));
@@ -273,7 +291,7 @@ export function buildOncologyBrief(input: {
         diagnosisDate: formatDate(primaryMeta.diagnosisDate || oncologyDiagnostic?.createdAt),
         carePhase: safeString(primaryMeta.carePhase) || safeString(oncologyDiagnostic?.conditionStatus) || 'Active follow-up',
         treatmentIntent: safeString(primaryMeta.treatmentIntent) || 'Clinician documented plan',
-        currentPlan: safeString(primaryMeta.currentPlan) || safeString(oncologyDiagnostic?.treatmentPlan) || 'Care plan documented by clinician',
+        currentPlan: safeString(primaryMeta.currentPlan) || summarizePlan(safeString(oncologyDiagnostic?.treatmentPlan)) || 'Care plan documented by clinician',
         nextMilestone: safeString(primaryMeta.nextMilestone) || 'Next review scheduled',
         owner: safeString(primaryMeta.owner) || 'Oncology care team',
         dataWindow: safeString(primaryMeta.dataWindow) || getDataWindow(timeline, reports),

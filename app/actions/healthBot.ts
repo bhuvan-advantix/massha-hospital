@@ -65,7 +65,7 @@ export async function chatWithHealthBot(message: string, context: string) {
         if (!apiKey) return { error: "AI Service Unavailable" };
 
         const systemPrompt = `
-        You are a warm, professional, and PRIVATE Health Assistant named "Niraiva Health Bot".
+        You are a warm, professional, and PRIVATE Health Assistant named "Massha Health Bot".
         You are chatting with a specific patient.
 
         PATIENT CONTEXT:
@@ -78,33 +78,48 @@ export async function chatWithHealthBot(message: string, context: string) {
         4. **PERSONALIZE**: Use the patient's profile (age, conditions) to tailor advice (e.g., "Since you have diabetes, avoid...").
         5. **FORMATTING**: 
            - Do NOT use markdown (no **, no #).
-           - Do NOT sign off with "Best, Niraiva Health Bot".
+           - Do NOT sign off with "Best, Massha Health Bot".
            - Use HTML tags for formatting: <b>for bold</b>, <br> for line breaks, and <ul><li> for lists.
            - Make it visually clean and easy to read.
 
         User Question: "${message}"
         `;
 
-        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: "mistral-small-latest",
-                messages: [
-                    { role: "system", content: "You are a helpful medical assistant. You DO NOT prescribe medication." },
-                    { role: "user", content: systemPrompt }
-                ],
-                temperature: 0.3,
-            })
-        });
+        // List of Mistral models to try in order of priority/quota availability
+        const mistralModels = ["open-mistral-7b", "open-mistral-nemo", "mistral-tiny", "mistral-small-latest"];
 
-        if (!response.ok) throw new Error("AI API Failed");
+        for (const model of mistralModels) {
+            try {
+                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [
+                            { role: "system", content: "You are a helpful medical assistant. You DO NOT prescribe medication." },
+                            { role: "user", content: systemPrompt }
+                        ],
+                        temperature: 0.3,
+                    })
+                });
 
-        const data = await response.json();
-        return { reply: data.choices[0].message.content };
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.choices && data.choices[0]?.message?.content) {
+                        return { reply: data.choices[0].message.content };
+                    }
+                } else {
+                    console.warn(`Mistral model ${model} returned status ${response.status}, trying next model...`);
+                }
+            } catch (err) {
+                console.warn(`Mistral model ${model} error:`, err);
+            }
+        }
+
+        return { error: "Mistral AI service unavailable. Please try again." };
 
     } catch (error) {
         console.error("Bot Error:", error);

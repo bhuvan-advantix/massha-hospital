@@ -116,27 +116,40 @@ async function extractLabDataWithAI(buffer: Buffer): Promise<{
             }
         `;
 
-        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${mistralKey}`
-            },
-            body: JSON.stringify({
-                model: "mistral-small-latest",
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.1,
-                response_format: { type: "json_object" }
-            })
-        });
+        const mistralModels = ["open-mistral-7b", "open-mistral-nemo", "mistral-tiny", "mistral-small-latest"];
+        let content = "";
 
-        if (!response.ok) {
-            const err = await response.text();
-            throw new Error(`Mistral API Error: ${err}`);
+        for (const model of mistralModels) {
+            try {
+                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${mistralKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [{ role: "user", content: prompt }],
+                        temperature: 0.1,
+                        response_format: { type: "json_object" }
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.choices && data.choices[0]?.message?.content) {
+                        content = data.choices[0].message.content;
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.warn(`Mistral model ${model} error:`, err);
+            }
         }
 
-        const data = await response.json();
-        const content = data.choices[0].message.content;
+        if (!content) {
+            throw new Error("Mistral API failed across all models");
+        }
 
         console.log("Mistral AI response received.");
 
@@ -704,26 +717,39 @@ export async function analyzeTestResult(
         - Return ONLY the HTML structure above with the content filled in. Do not wrap in markdown blocks.
         `;
 
-        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: "mistral-small-latest",
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.3,
-            })
-        });
+        const mistralModels = ["open-mistral-7b", "open-mistral-nemo", "mistral-tiny", "mistral-small-latest"];
+        let text = "";
 
-        if (!response.ok) {
-            console.error("Mistral API Error Status:", response.status);
-            return { success: false, error: "AI service currently unavailable." };
+        for (const model of mistralModels) {
+            try {
+                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [{ role: "user", content: prompt }],
+                        temperature: 0.3,
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.choices && data.choices[0]?.message?.content) {
+                        text = data.choices[0].message.content;
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.warn(`Mistral model ${model} error:`, err);
+            }
         }
 
-        const data = await response.json();
-        let text = data.choices[0].message.content;
+        if (!text) {
+            return { success: false, error: "AI service currently unavailable." };
+        }
 
         // Cleanup markdown code blocks if Mistral sends them
         text = text.replace(/```html/g, '').replace(/```/g, '').trim();
@@ -895,31 +921,37 @@ export async function generateLabAnalysis(labReportId: string) {
                 `;
 
                 console.log('[generateLabAnalysis] Calling Mistral API...');
-                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
-                    body: JSON.stringify({
-                        model: "mistral-small-latest",
-                        messages: [{ role: "user", content: prompt }],
-                        temperature: 0.2
-                    })
-                });
+                const mistralModels = ["open-mistral-7b", "open-mistral-nemo", "mistral-tiny", "mistral-small-latest"];
 
-                console.log('[generateLabAnalysis] Mistral API response status:', response.status);
+                for (const model of mistralModels) {
+                    try {
+                        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mistralKey}` },
+                            body: JSON.stringify({
+                                model,
+                                messages: [{ role: "user", content: prompt }],
+                                temperature: 0.2
+                            })
+                        });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    let content = data.choices?.[0]?.message?.content || "";
-                    content = content.replace(/```html/g, '').replace(/```/g, '').trim();
-                    if (content.startsWith('<div')) {
-                        analysis = content;
-                        console.log('[generateLabAnalysis] Successfully generated AI analysis');
-                    } else {
-                        console.warn('[generateLabAnalysis] AI response did not start with <div, using fallback');
+                        if (response.ok) {
+                            const data = await response.json();
+                            let content = data.choices?.[0]?.message?.content || "";
+                            content = content.replace(/```html/g, '').replace(/```/g, '').trim();
+                            if (content.startsWith('<div')) {
+                                analysis = content;
+                                console.log(`[generateLabAnalysis] Successfully generated AI analysis using ${model}`);
+                                break;
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(`Mistral model ${model} error:`, err);
                     }
-                } else {
-                    const errorText = await response.text();
-                    console.error('[generateLabAnalysis] Mistral API error:', response.status, errorText);
+                }
+
+                if (!analysis) {
+                    console.warn('[generateLabAnalysis] AI generation did not produce valid HTML, using fallback');
                 }
             } else {
                 console.error('[generateLabAnalysis] Mistral API key not found in environment');

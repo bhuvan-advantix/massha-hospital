@@ -1717,9 +1717,14 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Diagnosis date</p>
                                         <p className="text-sm font-black text-slate-900">{oncologyBrief.diagnosisDate}</p>
                                     </div>
-                                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Current regimen</p>
-                                        <p className="text-sm font-bold text-slate-800 leading-relaxed">{oncologyBrief.currentPlan}</p>
+                                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4 overflow-hidden">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Current regimen</p>
+                                        <p
+                                            className="text-sm font-bold text-slate-800 leading-snug"
+                                            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                                        >
+                                            {oncologyBrief.currentPlan}
+                                        </p>
                                     </div>
                                     <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
                                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Next restaging scan</p>

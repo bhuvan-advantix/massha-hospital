@@ -39,25 +39,39 @@ export async function POST(req: Request) {
         Next Follow Up: ${followUp || "None scheduled"}
         `;
 
-        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: "mistral-small-latest",
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.2,
-            })
-        });
+        const mistralModels = ["open-mistral-7b", "open-mistral-nemo", "mistral-tiny", "mistral-small-latest"];
+        let summary = "";
 
-        if (!response.ok) {
-            throw new Error(`Mistral API Error: ${response.status}`);
+        for (const model of mistralModels) {
+            try {
+                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [{ role: "user", content: prompt }],
+                        temperature: 0.2,
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.choices && data.choices[0]?.message?.content) {
+                        summary = data.choices[0].message.content;
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.warn(`Mistral model ${model} error:`, err);
+            }
         }
 
-        const data = await response.json();
-        let summary = data.choices[0].message.content;
+        if (!summary) {
+            throw new Error("Mistral API failed across all models");
+        }
 
         // Force strip any remaining markdown symbols that Mistral might have leaked (but preserve hyphens and slashes for medical data)
         summary = summary.replace(/[*#_`]/g, '').trim();

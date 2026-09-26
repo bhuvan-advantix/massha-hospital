@@ -46,7 +46,7 @@ export default function HealthBot() {
                     setMessages([
                         {
                             role: 'bot',
-                            content: `Hello! I'm your Niraiva Health Assistant. I have access to your health profile and recent reports. How can I help you regarding your health today?`
+                            content: `Hello! I'm your Massha Health Assistant. I have access to your health profile and recent reports. How can I help you regarding your health today?`
                         }
                     ]);
                 }
@@ -113,7 +113,7 @@ export default function HealthBot() {
                                 <Bot className="w-5 h-5 text-teal-50" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-sm">Niraiva Assistant</h3>
+                                <h3 className="font-bold text-sm">Massha Assistant</h3>
                                 <p className="text-[10px] text-teal-100 opacity-90 hidden sm:block">Private & Secure • Health Insights</p>
                             </div>
                         </div>
