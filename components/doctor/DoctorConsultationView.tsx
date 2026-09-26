@@ -686,6 +686,30 @@ export default function DoctorConsultationView({
                 });
             }
 
+            // Save Diagnostic Pathway automatically on consultation submit
+            if (diagConditionName.trim() || diagnoses.length > 0 || diagNodes.length > 0) {
+                const finalCondName = diagConditionName.trim() || diagnoses.join(', ') || 'Clinical Evaluation';
+                const finalNodes = diagNodes.length > 0 ? diagNodes : [
+                    {
+                        id: 'node-consult',
+                        title: 'Consultation & Clinical Assessment',
+                        description: `Diagnosis: ${diagnoses.join(', ') || 'Under evaluation'}.${patientNote ? ` Advice: ${patientNote}` : ''}`,
+                        type: 'diagnosis',
+                        connections: [],
+                        parameters: formattedVitals.map(v => ({ name: v.name, value: v.value, unit: v.unit })),
+                        x: 0,
+                        y: 0
+                    }
+                ];
+                await saveDiagnostic(patient.id, {
+                    conditionName: finalCondName,
+                    conditionStatus: diagStatus,
+                    nodes: finalNodes.map(n => ({ ...n, date: new Date().toISOString() })),
+                    clinicalNotes: diagClinicalNotes || doctorNote || '',
+                    treatmentPlan: diagTreatmentPlan || (formattedMeds.length > 0 ? formattedMeds.map(m => m.name).join(', ') : ''),
+                }).catch(err => console.error('[Consultation] saveDiagnostic error:', err));
+            }
+
             if (result.success) {
                 if (shouldPrint) {
                     // ── Generate prescription PDF ─────────────────────────────

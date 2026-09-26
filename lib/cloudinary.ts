@@ -8,28 +8,31 @@ cloudinary.config({
 });
 
 /**
- * Upload a PDF file to Cloudinary
- * @param buffer - File buffer
- * @param fileName - Original file name
- * @param patientId - Patient ID for organizing files
- * @returns Cloudinary secure URL
+ * Upload a PDF or image file to Cloudinary.
+ * Detects whether the file is an image or PDF and sets the correct resource_type.
  */
 export async function uploadPdfToCloudinary(
     buffer: Buffer,
     fileName: string,
-    patientId: string
+    patientId: string,
+    mimeType?: string
 ): Promise<string> {
     try {
-        // Convert buffer to base64 data URI
-        const base64File = buffer.toString('base64');
-        const dataURI = `data:application/pdf;base64,${base64File}`;
+        const ext = (fileName.split('.').pop() ?? '').toLowerCase();
+        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff'];
+        const isImage = imageExts.includes(ext);
 
-        // Upload to Cloudinary
+        const detectedMime = mimeType
+            || (isImage ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/pdf');
+
+        const base64File = buffer.toString('base64');
+        const dataURI = `data:${detectedMime};base64,${base64File}`;
+
         const result = await cloudinary.uploader.upload(dataURI, {
-            resource_type: 'raw', // For PDFs, use 'raw' resource type
-            folder: `lab-reports/${patientId}`, // Organize by patient
-            public_id: `${Date.now()}-${fileName.replace(/\.pdf$/i, '')}`, // Unique filename
-            format: 'pdf',
+            resource_type: isImage ? 'image' : 'raw',
+            folder: `lab-reports/${patientId}`,
+            public_id: `${Date.now()}-${fileName.replace(/\.[^.]+$/, '')}`,
+            ...(isImage ? {} : { format: ext === 'pdf' ? 'pdf' : undefined }),
         });
 
         return result.secure_url;
@@ -40,30 +43,23 @@ export async function uploadPdfToCloudinary(
 }
 
 /**
- * Delete a PDF file from Cloudinary
- * @param publicId - Cloudinary public ID
+ * Delete a file from Cloudinary by public ID.
  */
 export async function deletePdfFromCloudinary(publicId: string): Promise<void> {
     try {
-        await cloudinary.uploader.destroy(publicId, {
-            resource_type: 'raw',
-        });
+        await cloudinary.uploader.destroy(publicId, { resource_type: 'raw' });
     } catch (error) {
         console.error('Cloudinary delete error:', error);
-        // Don't throw - deletion failure shouldn't break the app
     }
 }
 
 /**
- * Extract public ID from Cloudinary URL
- * @param url - Cloudinary secure URL
- * @returns Public ID
+ * Extract public ID from a Cloudinary URL.
  */
 export function extractPublicIdFromUrl(url: string): string {
-    // Example URL: https://res.cloudinary.com/dx4zhyxk4/raw/upload/v1234567890/lab-reports/patient-id/filename.pdf
     const matches = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
     if (matches && matches[1]) {
-        return matches[1].replace(/\.[^/.]+$/, ''); // Remove extension
+        return matches[1].replace(/\.[^/.]+$/, '');
     }
     return '';
 }
