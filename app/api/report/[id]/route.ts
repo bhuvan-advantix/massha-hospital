@@ -2,20 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/db";
-import { labReports, users, patients } from "@/db/schema";
+import { labReports } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { v2 as cloudinary } from "cloudinary";
-
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-function getPublicIdFromUrl(url: string): string {
-    const match = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
-    return match ? decodeURIComponent(match[1]) : "";
-}
+import { fetchCloudinaryBuffer } from '@/lib/cloudinary';
 
 /**
  * GET /api/report/[id]?mode=view     → Inline PDF viewer in browser
@@ -48,9 +37,11 @@ export async function GET(
         }
 
         const fileName = report.fileName || "lab_report.pdf";
-        const disposition = mode === "download"
-            ? `attachment; filename="${fileName}"`
-            : `inline; filename="${fileName}"`;
+        const safeFileName = fileName.replace(/["\r\n]/g, '_').replace(/[^\x20-\x7E]/g, '_');
+        const disposition = `${mode === "download" ? "attachment" : "inline"}; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+        const extension = fileName.split('.').pop()?.toLowerCase() || 'pdf';
+        const contentType = ({ pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            webp: 'image/webp', gif: 'image/gif', tiff: 'image/tiff', bmp: 'image/bmp' } as Record<string, string>)[extension] || 'application/octet-stream';
 
         // If legacy base64 data exists
         if (report.fileData) {
@@ -58,7 +49,7 @@ export async function GET(
             return new NextResponse(buffer, {
                 status: 200,
                 headers: {
-                    "Content-Type": "application/pdf",
+                    "Content-Type": contentType,
                     "Content-Disposition": disposition,
                     "Cache-Control": "private, no-cache",
                     "X-Content-Type-Options": "nosniff",
@@ -70,31 +61,12 @@ export async function GET(
             return NextResponse.json({ error: "File not available" }, { status: 404 });
         }
 
-        const publicId = getPublicIdFromUrl(report.cloudinaryUrl);
-        if (!publicId) {
-            return NextResponse.json({ error: "Invalid file reference" }, { status: 400 });
-        }
+        const pdfBuffer = await fetchCloudinaryBuffer(report.cloudinaryUrl);
 
-        // Generate signed private download URL to bypass 401 ACL error
-        const isImage = report.cloudinaryUrl.includes("/image/");
-        const signedDownloadUrl = cloudinary.utils.private_download_url(publicId, "", {
-            resource_type: isImage ? "image" : "raw",
-            type: "upload",
-            expires_at: Math.floor(Date.now() / 1000) + 3600,
-        });
-
-        const cloudRes = await fetch(signedDownloadUrl);
-        if (!cloudRes.ok) {
-            console.error("Cloudinary signed fetch failed:", cloudRes.status);
-            return NextResponse.json({ error: "Failed to retrieve document from cloud" }, { status: 502 });
-        }
-
-        const pdfBuffer = await cloudRes.arrayBuffer();
-
-        return new NextResponse(pdfBuffer, {
+        return new NextResponse(new Uint8Array(pdfBuffer), {
             status: 200,
             headers: {
-                "Content-Type": "application/pdf",
+                "Content-Type": contentType,
                 "Content-Disposition": disposition,
                 "Cache-Control": "private, max-age=3600",
                 "X-Content-Type-Options": "nosniff",

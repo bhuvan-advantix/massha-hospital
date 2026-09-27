@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:reports": "node scripts/test-report-pipeline.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { deleteLabReport, getReportPdf, analyzeTestResult } from '@/app/actions/labReports';
 import DashboardNavbar from '@/components/DashboardNavbar';
 import Footer from '@/components/Footer';
+import Link from 'next/link';
+import { normalizeTestResults } from '@/lib/labResults';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     FileText,
@@ -183,10 +185,7 @@ export default function LabReports({
             ) : (
                 reports.map((report) => {
                     const isExpanded = expandedReport === report.id;
-                    const rawData = report.extractedData;
-                    const testResults: TestResult[] = Array.isArray(rawData)
-                        ? rawData
-                        : (rawData?.results || []);
+                    const testResults = normalizeTestResults(report.extractedData);
 
                     return (
                         <div
@@ -254,7 +253,8 @@ export default function LabReports({
                                     >
                                         {testResults.length === 0 ? (
                                             <div className="text-center py-6 text-slate-400 text-xs font-semibold">
-                                                No structured parameters extracted from this report.
+                                                <p>{(report.extractedData as any)?.extractionError || 'No structured parameters extracted from this report.'}</p>
+                                                <Link href={`/labreports/${report.id}`} className="inline-block mt-3 text-teal-700 underline">Open report to retry extraction</Link>
                                             </div>
                                         ) : (
                                             <div className="space-y-4">

@@ -160,6 +160,15 @@ export const labReports = sqliteTable('lab_reports', {
     uploadedAt: integer('uploaded_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+// Short-lived, server-only extraction cache used while a staff member registers
+// a patient from an uploaded document. It avoids parsing the same bytes twice.
+export const pendingReportExtractions = sqliteTable('pending_report_extractions', {
+    contentHash: text('content_hash').primaryKey(),
+    extraction: text('extraction', { mode: 'json' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 // Archive Table for Deleted Accounts
 export const deletedAccounts = sqliteTable('deleted_accounts', {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -446,4 +455,3 @@ export const diabetesRecords = sqliteTable('diabetes_records', {
     testDate: text('test_date').notNull(), // YYYY-MM-DD
     recordedAt: integer('recorded_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
-

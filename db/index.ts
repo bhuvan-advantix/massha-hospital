@@ -14,6 +14,25 @@ const client = createClient({
 
 export const db = drizzle(client, { schema });
 
+let extractionCacheSchemaEnsured = false;
+
+export async function ensureExtractionCacheSchema() {
+    if (extractionCacheSchemaEnsured) return;
+
+    await client.execute(`
+        CREATE TABLE IF NOT EXISTS pending_report_extractions (
+            content_hash TEXT PRIMARY KEY NOT NULL,
+            extraction TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER
+        )
+    `);
+    await client.execute(
+        "CREATE INDEX IF NOT EXISTS pending_report_extractions_expires_at_idx ON pending_report_extractions(expires_at)"
+    );
+    extractionCacheSchemaEnsured = true;
+}
+
 
 let labReportsSchemaEnsured = false;
 
@@ -36,6 +55,8 @@ export async function ensureLabReportsSchema() {
         { name: "doctor_name", type: "TEXT" },
         { name: "extracted_data", type: "TEXT" },
         { name: "raw_text", type: "TEXT" },
+        { name: "analysis", type: "TEXT" },
+        { name: "cloudinary_url", type: "TEXT" },
         { name: "file_size", type: "INTEGER" },
         { name: "page_count", type: "INTEGER" },
         { name: "file_data", type: "TEXT" },
@@ -54,6 +75,8 @@ export async function ensureLabReportsSchema() {
                 doctor_name TEXT,
                 extracted_data TEXT NOT NULL,
                 raw_text TEXT,
+                analysis TEXT,
+                cloudinary_url TEXT,
                 file_size INTEGER,
                 page_count INTEGER,
                 file_data TEXT,
@@ -198,4 +221,3 @@ export async function ensureDiabetesSchema() {
 
     diabetesSchemaEnsured = true;
 }
-

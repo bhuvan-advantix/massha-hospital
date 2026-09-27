@@ -14,7 +14,8 @@ import {
     deletePdfFromCloudinary,
     extractPublicIdFromUrl,
 } from "@/lib/cloudinary";
-import { LlamaParse } from "llama-parse";
+import { extractLabDataWithAI } from "@/lib/labExtraction";
+import { extractAndSaveLabReportByPatientId } from "./labReports";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -254,6 +255,7 @@ export async function createMasshaPatient(data: {
     customId?: string;
     patientId?: string;
     patientName?: string;
+    warning?: string;
     error?: string;
 }> {
     try {
@@ -325,6 +327,7 @@ export async function createMasshaPatient(data: {
                 .catch(() => null);
         }
 
+        let reportWarning: string | undefined;
         // If a document was pre-uploaded during registration, attach it now
         if (data.preUploadedDocUrl && data.preUploadedDocName) {
             const todayStr = new Date().toISOString().split("T")[0];
@@ -344,17 +347,12 @@ export async function createMasshaPatient(data: {
                     consultationData: { hospital: "Massha Hospital", doctor: doctorName, date: todayStr },
                 });
             } else {
-                await db.insert(labReports).values({
-                    patientId: newPatientId,
-                    fileName: data.preUploadedDocName,
-                    reportDate: todayStr,
-                    labName: "Massha Hospital Diagnostic Center",
-                    patientName: cleanName,
-                    doctorName,
-                    extractedData: { results: [], metadata: { Source: "Massha Hospital Staff Upload" } } as any,
-                    rawText: "Uploaded during patient registration",
-                    cloudinaryUrl: data.preUploadedDocUrl,
+                const result = await extractAndSaveLabReportByPatientId({
+                    patientId: newPatientId, cloudinaryUrl: data.preUploadedDocUrl,
+                    fileName: data.preUploadedDocName, fileSize: 0,
                 });
+                if (!result.success) throw new Error(result.error || 'Failed to attach report');
+                reportWarning = result.warning;
             }
             await db.insert(timelineEvents).values({
                 userId: newUserId,
@@ -369,7 +367,7 @@ export async function createMasshaPatient(data: {
         }
 
         revalidatePath("/massha");
-        return { success: true, customId, patientId: newPatientId, patientName: cleanName };
+        return { success: true, customId, patientId: newPatientId, patientName: cleanName, warning: reportWarning };
     } catch (err: any) {
         console.error("createMasshaPatient error:", err);
         return { success: false, error: err.message ?? "Failed to create patient." };
@@ -508,6 +506,7 @@ export async function createMasshaDoctor(data: {
 export async function uploadMasshaDocument(formData: FormData): Promise<{
     success: boolean;
     recordId?: string;
+    warning?: string;
     error?: string;
 }> {
     try {
@@ -595,25 +594,10 @@ export async function uploadMasshaDocument(formData: FormData): Promise<{
             revalidatePath("/dashboard");
             return { success: true, recordId: rx.id };
         } else {
-            const [report] = await db
-                .insert(labReports)
-                .values({
-                    patientId: patient.id,
-                    fileName: file.name,
-                    reportDate: todayStr,
-                    labName: "Massha Hospital Diagnostic Center",
-                    patientName: patientUser?.name ?? "Patient",
-                    doctorName,
-                    extractedData: {
-                        results: [],
-                        metadata: { Source: "Massha Hospital Staff Upload" },
-                    } as any,
-                    rawText: "Uploaded by Massha Hospital staff",
-                    fileSize: file.size,
-                    pageCount: 1,
-                    cloudinaryUrl,
-                })
-                .returning();
+            const result = await extractAndSaveLabReportByPatientId({
+                patientId: patient.id, cloudinaryUrl, fileName: file.name, fileSize: file.size,
+            });
+            if (!result.success || !result.reportId) throw new Error(result.error || 'Report processing failed');
 
             await db.insert(timelineEvents).values({
                 userId: patient.userId,
@@ -622,14 +606,14 @@ export async function uploadMasshaDocument(formData: FormData): Promise<{
                 eventDate: todayStr,
                 eventType: "test",
                 status: "completed",
-                reportId: report.id,
+                reportId: result.reportId,
                 doctorId: assignedDoctorId,
                 createdBy: "staff",
             });
 
             revalidatePath("/massha");
             revalidatePath("/dashboard");
-            return { success: true, recordId: report.id };
+            return { success: true, recordId: result.reportId, warning: result.warning };
         }
     } catch (err: any) {
         console.error("uploadMasshaDocument error:", err);
@@ -771,127 +755,19 @@ export async function extractPatientDetailsFromDoc(formData: FormData): Promise<
         const file = formData.get("file") as File;
         if (!file || !file.size) return { success: false, error: "No file provided." };
 
-        const llamaKey = process.env.LLAMA_PARSE_API_KEY;
-        const mistralKey = process.env.MISTRAL_API_KEY;
-
-        const empty: ExtractedPatientDetails = {
-            patientName: null, age: null, gender: null, bloodGroup: null,
-            phone: null, doctorName: null, labName: null, reportDate: null,
+        const result = await extractLabDataWithAI(Buffer.from(await file.arrayBuffer()), file.name);
+        const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : null;
+        return {
+            success: true, fileName: file.name,
+            extracted: {
+                patientName: result.patientName, doctorName: result.doctorName,
+                labName: result.labName, reportDate: result.reportDate,
+                age: text(result.metadata.age), gender: text(result.metadata.gender),
+                bloodGroup: text(result.metadata.bloodGroup), phone: text(result.metadata.phone),
+            },
         };
-
-        if (!llamaKey || !mistralKey) {
-            return { success: true, extracted: empty, fileName: file.name };
-        }
-
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-
-        try {
-            const parser = new LlamaParse({ apiKey: llamaKey });
-            const uint8Array = new Uint8Array(buffer);
-            const pdfFile = new File([uint8Array], file.name, { type: file.type || "application/pdf" });
-            const result = await parser.parseFile(pdfFile);
-            const rawMarkdown = result.markdown ?? "";
-
-            const prompt = `You are a medical document parser. Extract patient personal details from this document.
-
-Document:
-"""
-${rawMarkdown.substring(0, 12000)}
-"""
-
-Return ONLY valid JSON with these exact keys (null if not found):
-{
-  "patientName": "full patient name",
-  "age": "age as number string e.g. '54'",
-  "gender": "Male or Female or Other or null",
-  "bloodGroup": "e.g. O+ or AB- or null",
-  "phone": "phone number string or null",
-  "doctorName": "doctor name without Dr. prefix or null",
-  "labName": "lab or hospital name or null",
-  "reportDate": "YYYY-MM-DD or null"
-}`;
-
-            const mistralModels = ["open-mistral-7b", "open-mistral-nemo", "mistral-tiny", "mistral-small-latest"];
-            let content = "";
-            for (const model of mistralModels) {
-                try {
-                    const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${mistralKey}`,
-                        },
-                        body: JSON.stringify({
-                            model,
-                            messages: [{ role: "user", content: prompt }],
-                            temperature: 0.1,
-                            response_format: { type: "json_object" },
-                        }),
-                    });
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.choices?.[0]?.message?.content) {
-                            content = data.choices[0].message.content;
-                            break;
-                        }
-                    }
-                } catch { /* try next model */ }
-            }
-
-            let extracted: ExtractedPatientDetails = empty;
-            if (content) {
-                try {
-                    const jsonMatch = content.match(/\{[\s\S]*\}/);
-                    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
-                    extracted = {
-                        patientName: parsed.patientName ?? null,
-                        age: parsed.age ? String(parsed.age) : null,
-                        gender: parsed.gender ?? null,
-                        bloodGroup: parsed.bloodGroup ?? null,
-                        phone: parsed.phone ? String(parsed.phone) : null,
-                        doctorName: parsed.doctorName ?? null,
-                        labName: parsed.labName ?? null,
-                        reportDate: parsed.reportDate ?? null,
-                    };
-                } catch { /* use empty */ }
-            }
-
-            // Fallback: If AI did not extract patientName, derive candidate name from filename
-            if (!extracted.patientName && file.name) {
-                const derivedName = derivePatientNameFromFilename(file.name);
-                if (derivedName) {
-                    extracted.patientName = derivedName;
-                }
-            }
-
-            return { success: true, extracted, fileName: file.name };
-        } catch (aiErr) {
-            console.warn("AI extraction failed, using filename fallback:", aiErr);
-            const fallbackName = derivePatientNameFromFilename(file.name);
-            return {
-                success: true,
-                extracted: { ...empty, patientName: fallbackName },
-                fileName: file.name,
-            };
-        }
     } catch (err: any) {
         console.error("extractPatientDetailsFromDoc error:", err);
         return { success: false, error: err.message ?? "Extraction failed." };
     }
-}
-
-function derivePatientNameFromFilename(fileName: string): string | null {
-    if (!fileName) return null;
-    const clean = fileName
-        .replace(/\.[^/.]+$/, "") // strip extension
-        .replace(/[_.-]+/g, " ") // replace dividers with spaces
-        .replace(/\b(labreport|lab\s*report|prescription|report|prescription\s*file|blood\s*test|test|result|scan|medical|massha|hospital|pdf|jpg|jpeg|png|doc|docx)\b/gi, "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    if (clean.length >= 2 && /[a-zA-Z]/.test(clean)) {
-        return clean;
-    }
-    return null;
 }

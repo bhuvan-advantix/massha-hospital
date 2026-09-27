@@ -68,8 +68,7 @@ export default function DashboardNavbar({ user }: DashboardNavbarProps) {
         return () => window.removeEventListener('scroll', controlNavbar);
     }, [lastScrollY]);
 
-    const dashboardHref = user?.id ? `/dashboard?patientUserId=${user.id}` : '/dashboard';
-
+    const dashboardHref = user?.id ? `/dashboard?patientUserId=${encodeURIComponent(user.id)}` : '/dashboard';
     const navLinks = [
         { name: 'Dashboard', href: dashboardHref, icon: <LayoutDashboard className="w-4 h-4" /> },
     ];

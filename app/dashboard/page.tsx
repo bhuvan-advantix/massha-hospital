@@ -9,8 +9,6 @@ import { getLatestHealthParameters } from "@/app/actions/labReports";
 import { autoStopExpiredMedications } from "@/app/actions/medications";
 import { getPrescriptionsForPatient } from "@/app/actions/consultation";
 
-export const dynamic = "force-dynamic";
-
 export default async function DashboardPage({
     searchParams,
 }: {
@@ -43,42 +41,11 @@ export default async function DashboardPage({
     let targetUserData = sessionUserData;
     let isSwitchedPatient = false;
 
-    if (requestedUserId) {
+    if (requestedUserId && requestedUserId !== sessionUserId) {
         const [foundUser] = await db.select().from(users).where(eq(users.id, requestedUserId)).limit(1);
         if (foundUser) {
             targetUserData = foundUser;
-            if (foundUser.id !== sessionUserId) {
-                isSwitchedPatient = true;
-            }
-        }
-    } else {
-        // If no patientUserId provided in URL:
-        // Check if session user is an admin/doctor or has no active clinical records.
-        // In that case, fallback to the latest registered patient so they immediately see live data.
-        const isAdminOrDoc = sessionUserData.role === 'admin' || sessionUserData.role === 'doctor' || sessionUserData.email?.includes('admin') || sessionUserData.customId?.includes('ADMIN');
-
-        let [selfPatient] = await db.select().from(patients).where(eq(patients.userId, sessionUserId)).limit(1);
-        let hasActiveRecords = false;
-
-        if (selfPatient && !isAdminOrDoc) {
-            const [report] = await db.select().from(labReports).where(eq(labReports.patientId, selfPatient.id)).limit(1);
-            if (report || selfPatient.age || selfPatient.gender || selfPatient.chronicConditions) {
-                hasActiveRecords = true;
-            }
-        }
-
-        if (!hasActiveRecords || isAdminOrDoc) {
-            // Find most recent active patient
-            const allPatients = await db.select().from(patients).orderBy(desc(patients.createdAt));
-            const activePatient = allPatients.find(p => p.userId !== sessionUserId && (p.age || p.gender || p.chronicConditions)) || allPatients.find(p => p.userId !== sessionUserId) || allPatients[0];
-
-            if (activePatient && activePatient.userId !== sessionUserId) {
-                const [activeUser] = await db.select().from(users).where(eq(users.id, activePatient.userId)).limit(1);
-                if (activeUser) {
-                    targetUserData = activeUser;
-                    isSwitchedPatient = true;
-                }
-            }
+            isSwitchedPatient = true;
         }
     }
 

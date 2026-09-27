@@ -2,8 +2,6 @@
 
 import { useState, useMemo } from 'react';
 import {
-    LineChart,
-    Line,
     BarChart,
     Bar,
     XAxis,
@@ -13,7 +11,6 @@ import {
     ResponsiveContainer,
     Legend
 } from 'recharts';
-import Link from 'next/link';
 import {
     Activity,
     Droplets,
@@ -21,88 +18,62 @@ import {
     Heart,
     Calendar,
     FlaskConical,
-    Loader2,
-    ArrowLeft
+    Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateHealthParametersAnalysis } from '@/app/actions/healthParameters';
+import { generateLabAnalysis } from '@/app/actions/labReports';
 import { useRouter } from 'next/navigation';
 
-// Parameters to EXCLUDE from all views (not clinically tracked)
-const EXCLUDED_PARAMS = ['weight', 'height'];
-// The 4 key parameters to display
-const KEY_PARAMS = ['glucose', 'cholesterol', 'pressure', 'hba1c'];
-
-const isExcluded = (paramName: string) =>
-    EXCLUDED_PARAMS.some(ex => paramName.toLowerCase().includes(ex));
-
-export default function HealthParameters({
-    history,
-    analyses,
-    highlightParam,
-    patientUserId
-}: {
-    history: any[];
-    analyses: Record<string, string>;
-    highlightParam?: string;
-    patientUserId?: string;
-}) {
+export default function HealthParameters({ history, analyses }: { history: any[], analyses: Record<string, string> }) {
     const [analyzingIds, setAnalyzingIds] = useState<Record<string, boolean>>({});
     const [localAnalyses, setLocalAnalyses] = useState<Record<string, string>>({});
     const [visibleAnalyses, setVisibleAnalyses] = useState<Record<string, boolean>>({});
     const router = useRouter();
+    const [analysisErrors, setAnalysisErrors] = useState<Record<string, string>>({});
 
-    // Filter out Weight and Height globally
-    const filteredHistory = useMemo(() =>
-        history.filter(r => !isExcluded(r.parameterName || '')),
-        [history]);
+    const filteredHistory = history;
+    const metricKeys = [...new Set(history.map(r => `${r.parameterName} (${r.unit || 'unit not provided'})`))];
+    const [selectedMetric, setSelectedMetric] = useState('');
+    const activeMetric = metricKeys.includes(selectedMetric) ? selectedMetric : metricKeys[0] || '';
 
-    // Group history by CALENDAR DATE (YYYY-MM-DD) so same-day tests appear in one card
+    // Keep each source report separate, including multiple reports on the same day.
     const groupedHistory = useMemo(() => {
         const groups: Record<string, any[]> = {};
         filteredHistory.forEach(record => {
-            // Normalise to just YYYY-MM-DD, stripping any time component
-            const calendarDate = (record.testDate || '').toString().slice(0, 10);
+            // Legacy unlinked parameters are grouped by their recorded date.
+            const calendarDate = record.labReportId || (record.testDate || 'undated').toString().slice(0, 10);
             if (!groups[calendarDate]) groups[calendarDate] = [];
             groups[calendarDate].push(record);
         });
 
         return Object.entries(groups)
             .map(([date, records]) => {
-                const dateObj = new Date(date);
+                const dateObj = new Date(records[0]?.testDate || '');
+                const hasDate = !Number.isNaN(dateObj.getTime());
                 const day = dateObj.getDate();
                 const month = dateObj.toLocaleDateString('en-US', { month: 'short' });
                 const year = dateObj.getFullYear().toString().slice(-2);
 
                 return {
                     date,
-                    fullDate: dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-                    shortDate: `${day} ${month} '${year}`,
+                    fullDate: hasDate ? dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'Report date not provided',
+                    shortDate: hasDate ? `${day} ${month} '${year}` : 'Undated',
+                    sortDate: hasDate ? dateObj.getTime() : 0,
                     records,
                     labReportId: records[0]?.labReportId
                 };
             })
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            .sort((a, b) => b.sortDate - a.sortDate);
     }, [filteredHistory]);
 
-    // Prepare Chart Data
-    const chartData = useMemo(() => {
-        return [...groupedHistory].reverse().map(group => {
-            const dataPoint: any = { date: group.shortDate };
-            group.records.forEach(r => {
-                const val = parseFloat(r.value.replace(/[^0-9.]/g, ''));
-                if (!isNaN(val)) {
-                    if (r.parameterName.includes('Glucose')) dataPoint.glucose = val;
-                    if (r.parameterName.includes('Pressure')) dataPoint.bp = val;
-                    if (r.parameterName.includes('HbA1c')) dataPoint.hba1c = val;
-                    if (r.parameterName.includes('Cholesterol')) dataPoint.cholesterol = val;
-                }
-            });
-            return dataPoint;
-        });
-    }, [groupedHistory]);
+    const chartData = useMemo(() => [...groupedHistory].reverse().flatMap(group => {
+        const record = group.records.find(r => `${r.parameterName} (${r.unit || 'unit not provided'})` === activeMetric);
+        const text = String(record?.value ?? '').trim();
+        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) return [];
+        return [{ date: group.shortDate, value: Number(text) }];
+    }), [groupedHistory, activeMetric]);
 
-    const handleGenerateAnalysis = async (date: string, parameters: any[], patientId: string) => {
+    const handleGenerateAnalysis = async (date: string, parameters: any[]) => {
         if (!date || !parameters || parameters.length === 0) {
             console.warn("No parameters provided for analysis");
             return;
@@ -110,13 +81,12 @@ export default function HealthParameters({
 
         console.log("Starting analysis for date:", date);
         setAnalyzingIds(prev => ({ ...prev, [date]: true }));
+        setAnalysisErrors(prev => ({ ...prev, [date]: '' }));
 
         try {
-            const result = await generateHealthParametersAnalysis(
-                parameters,
-                date,
-                patientId
-            );
+            const reportId = parameters[0]?.labReportId;
+            if (!reportId) throw new Error('No source report is linked to these parameters');
+            const result = await generateLabAnalysis(reportId);
             console.log("Analysis result:", result);
 
             if (result.success && result.analysis) {
@@ -125,18 +95,10 @@ export default function HealthParameters({
                 router.refresh();
             } else {
                 console.error("Analysis generation failed:", result.error || "Unknown error");
-                // Set error message in local analyses
-                setLocalAnalyses(prev => ({
-                    ...prev,
-                    [date]: `<div class="p-4 bg-red-50 text-red-600 rounded-xl">Unable to generate analysis. ${result.error || 'Please try again later.'}</div>`
-                }));
+                setAnalysisErrors(prev => ({ ...prev, [date]: result.error || 'Unable to generate analysis. Please retry.' }));
             }
-        } catch (error) {
-            console.error("Analysis failed with exception:", error);
-            setLocalAnalyses(prev => ({
-                ...prev,
-                [date]: `<div class="p-4 bg-red-50 text-red-600 rounded-xl">Failed to generate analysis. Please check your connection and try again.</div>`
-            }));
+        } catch {
+            setAnalysisErrors(prev => ({ ...prev, [date]: 'Unable to generate analysis. Please retry.' }));
         } finally {
             setAnalyzingIds(prev => ({ ...prev, [date]: false }));
         }
@@ -184,21 +146,12 @@ export default function HealthParameters({
 
     return (
         <div className="max-w-5xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
-            {/* Page Heading & Back Navigation */}
-            <div className="px-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                    <h1 className="text-3xl sm:text-4xl font-black text-slate-900">
-                        Health <span className="text-teal-600">Parameters</span>
-                    </h1>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1">Track and analyze your health metrics over time</p>
-                </div>
-                <Link
-                    href={patientUserId ? `/dashboard?patientUserId=${patientUserId}` : '/dashboard'}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-sm transition-colors self-start sm:self-auto"
-                >
-                    <ArrowLeft className="w-4 h-4 text-slate-500" />
-                    Back to Dashboard
-                </Link>
+            {/* Page Heading */}
+            <div className="px-1">
+                <h1 className="text-3xl sm:text-4xl font-black text-slate-900">
+                    Health <span className="text-teal-600">Parameters</span>
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-500 mt-1">Track and analyze your health metrics over time</p>
             </div>
 
             {/* Visual Progress Bar Chart */}
@@ -207,7 +160,13 @@ export default function HealthParameters({
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-sm"
             >
-                <h3 className="text-base sm:text-lg md:text-xl font-bold text-slate-900 mb-3 sm:mb-4 md:mb-6">Health Trends Overview</h3>
+                <h3 className="text-base sm:text-lg md:text-xl font-bold text-slate-900 mb-3">Health Trends Overview</h3>
+                <label className="block text-sm text-slate-600 mb-4">Parameter
+                    <select value={activeMetric} onChange={event => setSelectedMetric(event.target.value)} className="block w-full rounded-lg border border-slate-200 p-2 mt-1">
+                        {metricKeys.map(key => <option key={key} value={key}>{key}</option>)}
+                    </select>
+                </label>
+                {!chartData.length && <p className="text-sm text-slate-500">This result has no numeric measurements to chart.</p>}
 
                 <div className="h-[280px] sm:h-[350px] md:h-[450px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -265,172 +224,12 @@ export default function HealthParameters({
                                 }}
                             />
 
-                            <Bar dataKey="glucose" name="Blood Glucose (mg/dL)" fill="#ec4899" radius={[6, 6, 0, 0]} animationDuration={1500} maxBarSize={40} />
-                            <Bar dataKey="bp" name="Blood Pressure (mmHg)" fill="#10b981" radius={[6, 6, 0, 0]} animationDuration={1500} maxBarSize={40} />
-                            <Bar dataKey="cholesterol" name="Cholesterol (mg/dL)" fill="#f43f5e" radius={[6, 6, 0, 0]} animationDuration={1500} maxBarSize={40} />
-                            <Bar dataKey="hba1c" name="HbA1c (%)" fill="#8b5cf6" radius={[6, 6, 0, 0]} animationDuration={1500} maxBarSize={40} />
+                            <Bar dataKey="value" name={activeMetric} fill="#0d9488" radius={[6, 6, 0, 0]} maxBarSize={40} />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
 
-                {/* Custom Mobile Legend - 2x2 Grid */}
-                <div className="grid grid-cols-2 gap-2 mt-3 sm:hidden">
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-pink-500 flex-shrink-0"></div>
-                        <span className="text-[9px] font-semibold text-slate-700">Blood Glucose (mg/dL)</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></div>
-                        <span className="text-[9px] font-semibold text-slate-700">Blood Pressure (mmHg)</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-rose-500 flex-shrink-0"></div>
-                        <span className="text-[9px] font-semibold text-slate-700">Cholesterol (mg/dL)</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-purple-500 flex-shrink-0"></div>
-                        <span className="text-[9px] font-semibold text-slate-700">HbA1c (%)</span>
-                    </div>
-                </div>
-
             </motion.div>
-
-            {/* OLD CARDS - TO BE REMOVED */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" style={{ display: 'none' }}>
-                {(() => {
-                    const getParameterData = (paramKey: string) => {
-                        return chartData.map(d => ({
-                            date: d.date,
-                            value: d[paramKey]
-                        })).filter(d => d.value !== null);
-                    };
-
-                    const getLatestValue = (paramKey: string) => {
-                        const data = getParameterData(paramKey);
-                        return data.length > 0 ? data[data.length - 1].value : null;
-                    };
-
-                    const getTrendDirection = (paramKey: string) => {
-                        const data = getParameterData(paramKey);
-                        if (data.length < 2) return 'stable';
-                        const first = data[0].value as number;
-                        const last = data[data.length - 1].value as number;
-                        if (last < first) return 'down';
-                        if (last > first) return 'up';
-                        return 'stable';
-                    };
-
-                    const metrics = [
-                        {
-                            key: 'glucose',
-                            name: 'Blood Glucose',
-                            unit: 'mg/dL',
-                            color: '#ec4899',
-                            bgGradient: 'from-pink-500 to-pink-600',
-                            icon: Droplets,
-                            goodTrend: 'down'
-                        },
-                        {
-                            key: 'bp',
-                            name: 'Blood Pressure',
-                            unit: 'mmHg',
-                            color: '#10b981',
-                            bgGradient: 'from-emerald-500 to-emerald-600',
-                            icon: Heart,
-                            goodTrend: 'stable'
-                        },
-                        {
-                            key: 'cholesterol',
-                            name: 'Cholesterol',
-                            unit: 'mg/dL',
-                            color: '#f43f5e',
-                            bgGradient: 'from-rose-500 to-rose-600',
-                            icon: Activity,
-                            goodTrend: 'down'
-                        },
-                        {
-                            key: 'hba1c',
-                            name: 'HbA1c',
-                            unit: '%',
-                            color: '#8b5cf6',
-                            bgGradient: 'from-purple-500 to-purple-600',
-                            icon: FlaskConical,
-                            goodTrend: 'down'
-                        },
-                    ];
-
-                    return metrics.map(metric => {
-                        const data = getParameterData(metric.key);
-                        const latestValue = getLatestValue(metric.key);
-                        const trend = getTrendDirection(metric.key);
-                        const Icon = metric.icon;
-
-                        if (data.length === 0) return null;
-
-                        const isGoodTrend = (trend === metric.goodTrend) || (trend === 'stable');
-
-                        return (
-                            <motion.div
-                                key={metric.key}
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-md transition-shadow"
-                            >
-                                {/* Header */}
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className={`p-2 bg-gradient-to-br ${metric.bgGradient} rounded-xl shadow-sm`}>
-                                        <Icon className="w-5 h-5 text-white" />
-                                    </div>
-                                    {trend !== 'stable' && (
-                                        <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${isGoodTrend ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                            {trend === 'down' ? (
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                                                </svg>
-                                            ) : (
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                                                </svg>
-                                            )}
-                                            <span className="text-[10px] font-bold">{isGoodTrend ? 'Good' : 'Alert'}</span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Value */}
-                                <div className="mb-2">
-                                    <p className="text-xs text-slate-500 font-medium mb-1">{metric.name}</p>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-2xl font-black text-slate-900">{latestValue}</span>
-                                        <span className="text-xs text-slate-400 font-medium">{metric.unit}</span>
-                                    </div>
-                                </div>
-
-                                {/* Mini Sparkline */}
-                                <div className="h-12 -mx-2">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={data}>
-                                            <Line
-                                                type="monotone"
-                                                dataKey="value"
-                                                stroke={metric.color}
-                                                strokeWidth={2}
-                                                dot={false}
-                                                animationDuration={1000}
-                                            />
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                </div>
-
-                                {/* Date Range */}
-                                <p className="text-[10px] text-slate-400 mt-2 text-center">
-                                    {data[0].date} → {data[data.length - 1].date}
-                                </p>
-                            </motion.div>
-                        );
-                    });
-                })()}
-            </div>
 
             {/* History List */}
             <div className="space-y-3 sm:space-y-4">
@@ -440,14 +239,13 @@ export default function HealthParameters({
                     // Deduplicate records in this group by parameterName (keep last/latest per name)
                     const dedupMap = new Map<string, any>();
                     group.records.forEach((r: any) => {
-                        dedupMap.set(r.parameterName?.toLowerCase(), r);
+                        dedupMap.set(`${r.parameterName?.toLowerCase()}|${r.unit || ""}`, r);
                     });
                     const uniqueRecords = Array.from(dedupMap.values());
 
                     // Use local state for analysis (keyed by date)
-                    const analysis = localAnalyses[group.date];
+                    const analysis = localAnalyses[group.date] || analyses[group.labReportId];
                     const isAnalyzing = analyzingIds[group.date] || false;
-                    const patientId = group.records[0]?.patientId || '';
 
                     return (
                         <motion.div
@@ -476,7 +274,7 @@ export default function HealthParameters({
                                             if (analysis) {
                                                 setVisibleAnalyses(prev => ({ ...prev, [group.date]: !prev[group.date] }));
                                             } else if (!isAnalyzing) {
-                                                handleGenerateAnalysis(group.date, group.records, patientId);
+                                                handleGenerateAnalysis(group.date, group.records);
                                             }
                                         }}
                                         disabled={isAnalyzing}
@@ -488,44 +286,17 @@ export default function HealthParameters({
 
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 items-stretch">
                                     {uniqueRecords.map((record: any, idx: number) => {
-                                        // Infer unit if missing
-                                        const getUnit = (rec: any) => {
-                                            if (rec.unit && rec.unit.trim() !== '') return rec.unit;
-                                            const name = rec.parameterName?.toLowerCase() || '';
-                                            if (name.includes('pressure')) return 'mmHg';
-                                            if (name.includes('glucose') || name.includes('cholesterol')) return 'mg/dL';
-                                            if (name.includes('hba1c')) return '%';
-                                            return '';
-                                        };
-                                        const unit = getUnit(record);
-                                        // Normalize status: default to 'Normal' if missing and value exists
-                                        let statusValue = record.status?.toLowerCase() || '';
-                                        if (!statusValue && record.value) {
-                                            statusValue = 'normal';
-                                        }
+                                        const unit = record.unit || '';
+                                        const statusValue = record.status?.toLowerCase() || 'Not assessed';
 
                                         const isAbnormal = statusValue.includes('high') || statusValue.includes('low') || statusValue.includes('critical');
-                                        const isHighlighted = !!highlightParam && record.parameterName?.toLowerCase().includes(highlightParam.toLowerCase());
+
 
                                         return (
-                                            <div
-                                                key={idx}
-                                                className={`rounded-lg sm:rounded-xl p-3 h-full flex flex-col justify-between transition-all ${
-                                                    isHighlighted
-                                                        ? 'bg-teal-50/80 border-2 border-teal-500 shadow-sm ring-2 ring-teal-200'
-                                                        : 'bg-slate-50 border border-slate-100 hover:bg-slate-100'
-                                                }`}
-                                            >
-                                                <div className="flex items-center justify-between gap-1.5 mb-2 text-slate-500 text-[10px] sm:text-xs font-medium">
-                                                    <div className="flex items-center gap-1.5 truncate">
-                                                        {getParamIcon(record.parameterName)}
-                                                        <span className={`truncate ${isHighlighted ? 'font-black text-teal-900' : ''}`} title={record.parameterName}>{record.parameterName}</span>
-                                                    </div>
-                                                    {isHighlighted && (
-                                                        <span className="shrink-0 text-[8px] font-black uppercase bg-teal-600 text-white px-1.5 py-0.5 rounded-full">
-                                                            Selected
-                                                        </span>
-                                                    )}
+                                            <div key={idx} className="bg-slate-50 rounded-lg sm:rounded-xl p-3 h-full flex flex-col justify-between hover:bg-slate-100 transition-colors">
+                                                <div className="flex items-center gap-1.5 mb-2 text-slate-500 text-[10px] sm:text-xs font-medium">
+                                                    {getParamIcon(record.parameterName)}
+                                                    <span className="truncate" title={record.parameterName}>{record.parameterName}</span>
                                                 </div>
                                                 <div className="flex items-baseline gap-1 mt-auto">
                                                     <span className={`text-base sm:text-lg font-black ${isAbnormal ? 'text-red-600' : 'text-emerald-600'
@@ -534,7 +305,7 @@ export default function HealthParameters({
                                                     </span>
                                                     <span className="text-[10px] text-slate-400 font-medium">{unit}</span>
                                                 </div>
-                                                {/* Status Badge */}
+                                                {/* Reported status */}
                                                 <div className={`mt-1 text-[9px] font-bold uppercase tracking-wider ${isAbnormal ? 'text-red-500' : 'text-emerald-500'}`}>
                                                     {statusValue}
                                                 </div>
@@ -543,6 +314,7 @@ export default function HealthParameters({
                                     })}
                                 </div>
 
+                                {analysisErrors[group.date] && <p role="alert" className="mt-3 text-sm text-red-600">{analysisErrors[group.date]}</p>}
                                 {/* AI Analysis button - only show on mobile, after parameters */}
                                 <div className="sm:hidden mt-3">
                                     <button
@@ -552,7 +324,7 @@ export default function HealthParameters({
                                             if (analysis) {
                                                 setVisibleAnalyses(prev => ({ ...prev, [group.date]: !prev[group.date] }));
                                             } else if (!isAnalyzing) {
-                                                handleGenerateAnalysis(group.date, group.records, patientId);
+                                                handleGenerateAnalysis(group.date, group.records);
                                             }
                                         }}
                                         disabled={isAnalyzing}
@@ -597,7 +369,7 @@ export default function HealthParameters({
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    handleGenerateAnalysis(group.date, group.records, patientId);
+                                                                    handleGenerateAnalysis(group.date, group.records);
                                                                 }}
                                                                 className="font-bold underline cursor-pointer hover:text-red-700 transition-colors"
                                                                 disabled={isAnalyzing}

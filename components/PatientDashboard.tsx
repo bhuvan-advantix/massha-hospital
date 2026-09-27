@@ -452,10 +452,10 @@ const HealthMetricCard = ({ title, value, unit, status, date }: any) => {
 
     const finalValue = cleanValue(value);
 
-    // Logic: If there is a value but no status, treat as "Normal"
+    // A value without an interpreted status must not be marked normal.
     let displayStatus = status;
     if (!displayStatus && finalValue) {
-        displayStatus = 'Normal';
+        displayStatus = 'Not assessed';
     }
 
     const s = (displayStatus || '').toLowerCase();
@@ -468,30 +468,15 @@ const HealthMetricCard = ({ title, value, unit, status, date }: any) => {
         badgeText = s.includes('low') ? 'low' : s.includes('high') ? 'elevated' : 'abnormal';
         badgeStyle = "bg-red-50 text-red-600 ring-red-300 font-extrabold";
     } else {
-        badgeText = 'normal';
+        badgeText = s === 'normal' ? 'normal' : 'Not assessed';
     }
 
     // Trend indicator
     let trendArrow = "•";
-    let trendText = "baseline range";
+    let trendText = "Not assessed";
     let trendStyle = "text-slate-500";
 
-    // Enhanced trend & sparkline points for tumor markers
-    const getSparklineData = (tName: string) => {
-        const n = (tName || '').toLowerCase();
-        if (n.includes('free psa')) return { points: [14.0, 12.5, 11.0], velocity: '↓ 21.4% (from 14% 3 mos ago)' };
-        if (n.includes('ca 15-3')) return { points: [22.0, 19.5, 17.0], velocity: '↓ from 22.0 U/mL (3 mos ago)' };
-        if (n.includes('cea')) return { points: [42.0, 18.4, 8.6], velocity: '↓ 79.5% from 42.0 ng/mL' };
-        if (n.includes('psa')) return { points: [8.9, 5.1, 2.4], velocity: '↓ 73% velocity drop' };
-        if (n.includes('cyfra')) return { points: [6.8, 5.2, 4.1], velocity: '↓ 39.7% reduction (3 mos ago)' };
-        return null;
-    };
-    const sparkData = getSparklineData(title);
-
-    if (sparkData) {
-        trendArrow = "↓";
-        trendText = sparkData.velocity;
-    } else if (s.includes('high') || s.includes('elevated')) {
+    if (s.includes('high') || s.includes('elevated')) {
         trendArrow = "↑";
         trendText = "above range";
         trendStyle = "text-red-600 font-extrabold";
@@ -499,7 +484,7 @@ const HealthMetricCard = ({ title, value, unit, status, date }: any) => {
         trendArrow = "↓";
         trendText = "below range";
         trendStyle = "text-red-600 font-extrabold";
-    } else if (s === 'normal' || s === '') {
+    } else if (s === 'normal') {
         trendArrow = "✓";
         trendText = "normal baseline";
         trendStyle = "text-emerald-600 font-semibold";
@@ -526,34 +511,7 @@ const HealthMetricCard = ({ title, value, unit, status, date }: any) => {
                     {finalValue && <span className="text-[11px] font-medium text-slate-500 pb-0.5">{unit}</span>}
                 </div>
 
-                {/* SVG Mini Sparkline */}
-                {sparkData && (
-                    <div className="shrink-0 pb-1">
-                        <svg width="48" height="18" className="overflow-visible">
-                            {(() => {
-                                const pts = sparkData.points;
-                                const min = Math.min(...pts);
-                                const max = Math.max(...pts) || 1;
-                                const range = (max - min) || 1;
-                                const coords = pts.map((v, i) => {
-                                    const x = (i / (pts.length - 1)) * 48;
-                                    const y = 18 - ((v - min) / range) * 14 - 2;
-                                    return `${x.toFixed(1)},${y.toFixed(1)}`;
-                                });
-                                const strokeColor = isWarningOrHigh ? '#dc2626' : '#0d9488';
-                                return (
-                                    <>
-                                        <path d={`M ${coords.join(' L ')}`} fill="none" stroke={strokeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                        {coords.map((c, i) => {
-                                            const [cx, cy] = c.split(',');
-                                            return <circle key={i} cx={cx} cy={cy} r="2" fill={i === coords.length - 1 ? strokeColor : '#ffffff'} stroke={strokeColor} strokeWidth="1" />;
-                                        })}
-                                    </>
-                                );
-                            })()}
-                        </svg>
-                    </div>
-                )}
+
             </div>
 
             {/* Trend Indicator */}
@@ -938,7 +896,7 @@ function DiagnosticReportsSection({ reports, userId, isSwitchedPatient }: Diagno
         "https://images.unsplash.com/photo-1579154204601-01588f351e67?auto=format&fit=crop&q=80&w=200",
     ];
 
-    const reportsLink = userId ? `/labreports?patientUserId=${userId}` : '/labreports';
+    const reportsLink = isSwitchedPatient && userId ? `/labreports?patientUserId=${userId}` : '/labreports';
 
     return (
         <div className="space-y-4">
@@ -986,7 +944,7 @@ function DiagnosticReportsSection({ reports, userId, isSwitchedPatient }: Diagno
                             dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
                         }
 
-                        const targetHref = `/api/report/${report.id}?mode=view`;
+                        const targetHref = `/labreports/${report.id}`;
 
                         return (
                             <div key={report.id || idx} className="relative w-full group">
@@ -1695,8 +1653,9 @@ export default function PatientDashboard({ data }: DashboardProps) {
                             const cardPool: any[] = [];
                             const addedNames = new Set<string>();
 
+                            // Priority 1: Oncology markers
                             if (oncologyBrief.hasOncologyData && oncologyBrief.markers && oncologyBrief.markers.length > 0) {
-                                oncologyBrief.markers.forEach(m => {
+                                oncologyBrief.markers.forEach((m: any) => {
                                     const lowerName = m.name.toLowerCase();
                                     if (!addedNames.has(lowerName)) {
                                         addedNames.add(lowerName);
@@ -1711,6 +1670,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                 });
                             }
 
+                            // Priority 2: Stored health parameters from DB
                             if (healthParameters) {
                                 Object.keys(healthParameters).forEach(key => {
                                     const lowerKey = key.toLowerCase();
@@ -1722,7 +1682,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                                 title: key,
                                                 value: p.value,
                                                 unit: p.unit || '',
-                                                status: p.status || 'Normal',
+                                                status: p.status || 'Not assessed',
                                                 date: p.testDate || null,
                                             });
                                         }
@@ -1730,7 +1690,43 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                 });
                             }
 
-                            // Only real biomarkers from database - NO hardcoded fake numbers
+                            // Priority 3 (fallback): Read directly from lab report extractedData
+                            // Handles existing reports uploaded before the full-parameter-storage fix.
+                            if (cardPool.length < 4 && labReportsData && labReportsData.length > 0) {
+                                for (const report of labReportsData as any[]) {
+                                    if (cardPool.length >= 8) break;
+                                    const raw = report.extractedData;
+                                    if (!raw) continue;
+                                    const rawResults: any[] = Array.isArray(raw) ? raw : (raw?.results || []);
+
+                                    for (const item of rawResults) {
+                                        const tests: any[] = Array.isArray(item?.tests) ? item.tests
+                                            : (item?.name ? [item] : []);
+
+                                        for (const test of tests) {
+                                            if (!test) continue;
+                                            const name = String(test.name || test.parameterName || test.testName || '').trim();
+                                            const value = String(test.value ?? '').trim();
+                                            if (!name || !value || value === '--') continue;
+
+                                            const lowerName = name.toLowerCase();
+                                            if (addedNames.has(lowerName)) continue;
+                                            addedNames.add(lowerName);
+
+                                            cardPool.push({
+                                                title: name,
+                                                value: value,
+                                                unit: String(test.unit || ''),
+                                                status: String(test.status || 'Not assessed'),
+                                                date: report.reportDate || report.uploadedAt || null,
+                                            });
+
+                                            if (cardPool.length >= 8) break;
+                                        }
+                                        if (cardPool.length >= 8) break;
+                                    }
+                                }
+                            }
 
                             const abnormal = cardPool.filter(c => {
                                 const s = (c.status || '').toLowerCase();
@@ -1748,7 +1744,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                             <p className="text-xs text-slate-500 font-medium">Routine metabolic, tumor biomarker and lipid tracking</p>
                                         </div>
                                         <Link
-                                            href={user?.id ? `/dashboard/health?patientUserId=${user.id}` : '/dashboard/health'}
+                                            href={isSwitchedPatient && user?.id ? `/dashboard/health?patientUserId=${user.id}` : "/dashboard/health"}
                                             className="hidden sm:flex items-center gap-1.5 text-sm font-bold text-teal-600 hover:text-teal-700 transition-colors"
                                         >
                                             View All Details
@@ -1756,23 +1752,25 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                         </Link>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                                        {finalCards.map(card => {
-                                            const cardHref = user?.id
-                                                ? `/dashboard/health?param=${encodeURIComponent(card.title)}&patientUserId=${user.id}`
-                                                : `/dashboard/health?param=${encodeURIComponent(card.title)}`;
-
-                                            return (
-                                                <Link key={card.title} href={cardHref}>
-                                                <HealthMetricCard
-                                                    title={card.title}
-                                                    value={card.value}
-                                                    unit={card.unit}
-                                                    status={card.status}
-                                                    date={card.date}
-                                                />
-                                            </Link>
-                                            );
-                                        })}
+                                        {finalCards.length > 0 ? (
+                                            finalCards.map(card => (
+                                                <Link key={card.title} href={isSwitchedPatient && user?.id ? `/dashboard/health?patientUserId=${user.id}&param=${encodeURIComponent(card.title)}` : `/dashboard/health?param=${encodeURIComponent(card.title)}`}>
+                                                    <HealthMetricCard
+                                                        title={card.title}
+                                                        value={card.value}
+                                                        unit={card.unit}
+                                                        status={card.status}
+                                                        date={card.date}
+                                                    />
+                                                </Link>
+                                            ))
+                                        ) : (
+                                            <div className="col-span-4 bg-white rounded-2xl border border-dashed border-slate-200 p-8 flex flex-col items-center justify-center text-center gap-2">
+                                                <Activity className="w-8 h-8 text-slate-300" />
+                                                <p className="text-sm font-bold text-slate-500">No health parameters yet</p>
+                                                <p className="text-xs text-slate-400">Upload a lab report to see biomarker data here</p>
+                                            </div>
+                                        )}
                                     </div>
                                 </motion.div>
                             );
@@ -2455,7 +2453,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                     onClose={() => setShowSwitchPatient(false)}
                     onSwitch={(patientUserId) => {
                         setShowSwitchPatient(false);
-                        window.location.href = `/dashboard?patientUserId=${patientUserId}`;
+                        router.push(`/dashboard?patientUserId=${patientUserId}`);
                     }}
                 />
             )}

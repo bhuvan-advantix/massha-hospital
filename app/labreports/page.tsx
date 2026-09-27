@@ -40,59 +40,37 @@ export default async function LabReportsPage({
                     id: u.id,
                     name: u.name,
                     email: u.email,
-                    customId: u.customId || undefined,
+                    customId: u.customId,
                     image: u.image,
                 };
             }
         }
     }
 
-    const isAdminOrDoc = session.user.role === 'admin' || session.user.role === 'doctor' || session.user.email?.includes('admin') || (session.user as any).customId?.includes('ADMIN');
-
-    if (!targetPatient && !isAdminOrDoc) {
+    if (!targetPatient) {
         // Try session user
         targetPatient = await db.query.patients.findFirst({
             where: eq(patients.userId, session.user.id),
         });
-        if (targetPatient) {
-            const hasReports = await db.query.labReports.findFirst({
-                where: eq(labReports.patientId, targetPatient.id),
-            });
-            if (!hasReports) {
-                targetPatient = null;
-            }
-        }
     }
 
     // If still no patient found (e.g., hospital admin or doctor viewing lab reports)
     if (!targetPatient) {
-        // Find patient with reports first
-        const reportWithPatient = await db.query.labReports.findFirst({
-            orderBy: [desc(labReports.uploadedAt)],
+        const fallbackPatient = await db.query.patients.findFirst({
+            orderBy: [desc(patients.createdAt)],
         });
 
-        if (reportWithPatient?.patientId) {
-            targetPatient = await db.query.patients.findFirst({
-                where: eq(patients.id, reportWithPatient.patientId),
-            });
-        }
-
-        if (!targetPatient) {
-            targetPatient = await db.query.patients.findFirst({
-                orderBy: [desc(patients.createdAt)],
-            });
-        }
-
-        if (targetPatient) {
+        if (fallbackPatient) {
+            targetPatient = fallbackPatient;
             const u = await db.query.users.findFirst({
-                where: eq(users.id, targetPatient.userId),
+                where: eq(users.id, fallbackPatient.userId),
             });
             if (u) {
                 targetUser = {
                     id: u.id,
                     name: u.name,
                     email: u.email,
-                    customId: u.customId || undefined,
+                    customId: u.customId,
                     image: u.image,
                 };
             }

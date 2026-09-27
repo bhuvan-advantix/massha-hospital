@@ -1,5 +1,6 @@
 'use server';
 
+import { getMistralModel } from '@/lib/mistralModel';
 import { db } from '@/db';
 import { healthParameters } from '@/db/schema';
 import { eq, and, lt } from 'drizzle-orm';
@@ -121,7 +122,7 @@ export async function generateHealthParametersAnalysis(
                         'Authorization': `Bearer ${mistralKey}`
                     },
                     body: JSON.stringify({
-                        model: "mistral-small-latest",
+                        model: getMistralModel(),
                         messages: [{ role: "user", content: prompt }],
                         temperature: 0.2
                     })

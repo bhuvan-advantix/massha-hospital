@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getReportPdf, analyzeTestResult } from '@/app/actions/labReports';
 import DashboardNavbar from '@/components/DashboardNavbar';
 import Footer from '@/components/Footer';
+import { normalizeTestResults } from '@/lib/labResults';
 import {
     FileText,
     Calendar,
@@ -59,15 +60,13 @@ export default function SingleLabReportView({ user, report }: SingleLabReportVie
     const [analysisData, setAnalysisData] = useState<Record<string, string>>({});
     const [loadingAnalysis, setLoadingAnalysis] = useState<Record<string, boolean>>({});
     const [downloading, setDownloading] = useState(false);
+    const [reprocessing, setReprocessing] = useState(false);
+    const [processingMessage, setProcessingMessage] = useState('');
 
     const handleDownload = async () => {
         setDownloading(true);
         try {
-            if (report.cloudinaryUrl) {
-                window.open(report.cloudinaryUrl, '_blank');
-            } else {
-                window.print();
-            }
+            window.open(`/api/report/${report.id}?mode=download`, '_blank');
         } catch (err) {
             console.error('Download error:', err);
             window.print();
@@ -194,51 +193,7 @@ export default function SingleLabReportView({ user, report }: SingleLabReportVie
                     <div className="bg-white rounded-2xl p-4 md:p-6 border border-slate-200 shadow-sm">
                         <h2 className="text-lg font-black text-slate-900 mb-4">Extracted Parameters</h2>
                         {(() => {
-                            const rawData = report.extractedData;
-                            const rawResults: any[] = Array.isArray(rawData) ? rawData : (rawData?.results || []);
-
-                            // Normalize into category buckets safely
-                            const categories: { category: string; tests: any[] }[] = [];
-
-                            if (rawResults.length > 0) {
-                                const isCategorized = rawResults.some(r => Array.isArray(r?.tests));
-                                if (isCategorized) {
-                                    rawResults.forEach(r => {
-                                        if (Array.isArray(r?.tests)) {
-                                            categories.push({
-                                                category: r.category || 'General Parameters',
-                                                tests: r.tests
-                                            });
-                                        } else if (r?.name || r?.parameterName || r?.testName) {
-                                            const testObj = {
-                                                name: r.name || r.parameterName || r.testName || 'Parameter',
-                                                value: r.value || '--',
-                                                unit: r.unit || '',
-                                                referenceRange: r.referenceRange || r.reference || '',
-                                                status: r.status || 'normal'
-                                            };
-                                            let genCat = categories.find(c => c.category === 'General Parameters');
-                                            if (!genCat) {
-                                                genCat = { category: 'General Parameters', tests: [] };
-                                                categories.push(genCat);
-                                            }
-                                            genCat.tests.push(testObj);
-                                        }
-                                    });
-                                } else {
-                                    const flatTests = rawResults.map(r => ({
-                                        name: r.name || r.parameterName || r.testName || 'Parameter',
-                                        value: r.value || '--',
-                                        unit: r.unit || '',
-                                        referenceRange: r.referenceRange || r.reference || '',
-                                        status: r.status || 'normal'
-                                    }));
-                                    categories.push({
-                                        category: 'Laboratory Test Parameters',
-                                        tests: flatTests
-                                    });
-                                }
-                            }
+                            const categories = normalizeTestResults(report.extractedData);
 
                             if (categories.length > 0) {
                                 return categories.map((cat, idx) => (
@@ -263,7 +218,7 @@ export default function SingleLabReportView({ user, report }: SingleLabReportVie
                                                             <td className="py-2.5 px-3 font-semibold text-slate-900">{test.name}</td>
                                                             <td className="py-2.5 px-3 font-bold text-teal-600">{test.value}</td>
                                                             <td className="py-2.5 px-3 text-slate-500">{test.unit}</td>
-                                                            <td className="py-2.5 px-3 text-slate-500">{test.referenceRange || 'Clinician reviewed'}</td>
+                                                            <td className="py-2.5 px-3 text-slate-500">{test.referenceRange || 'Not provided'}</td>
                                                             <td className="py-2.5 px-3">
                                                                 <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-black uppercase border ${test.status === 'high'
                                                                     ? 'bg-rose-50 text-rose-700 border-rose-100'
@@ -271,7 +226,7 @@ export default function SingleLabReportView({ user, report }: SingleLabReportVie
                                                                         ? 'bg-amber-50 text-amber-700 border-amber-100'
                                                                         : 'bg-emerald-50 text-emerald-700 border-emerald-100'
                                                                     }`}>
-                                                                    {test.status || 'normal'}
+                                                                    {test.status || 'Not assessed'}
                                                                 </span>
                                                             </td>
                                                         </tr>
@@ -285,9 +240,28 @@ export default function SingleLabReportView({ user, report }: SingleLabReportVie
                                 return (
                                     <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-200 border-dashed">
                                         <AlertCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                                        <p className="text-slate-500 font-medium text-lg">
+                                        <p className="text-slate-500 font-medium text-lg mb-4">
                                             No test results could be extracted from this report
                                         </p>
+                                        <p role="status" className="text-sm text-amber-700 mb-3">{processingMessage || (report.extractedData as any)?.extractionError || ((report.extractedData as any)?.extractionStatus === 'no_measurements' ? 'Document processed; no measurable test results were found.' : '')}</p>
+                                        <button
+                                            disabled={reprocessing}
+                                            onClick={async () => {
+                                                setReprocessing(true);
+                                                setProcessingMessage('');
+                                                try {
+                                                    const { reprocessLabReport } = await import('@/app/actions/labReports');
+                                                    const res = await reprocessLabReport(report.id);
+                                                    if (res.success) window.location.reload();
+                                                    else setProcessingMessage(res.message);
+                                                } catch {
+                                                    setProcessingMessage('Reprocessing failed. Please retry.');
+                                                } finally { setReprocessing(false); }
+                                            }}
+                                            className="px-6 py-2.5 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 transition shadow-sm text-sm"
+                                        >
+                                            {reprocessing ? 'Extracting report…' : 'Re-extract Report Parameters'}
+                                        </button>
                                     </div>
                                 );
                             }

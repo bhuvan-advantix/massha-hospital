@@ -142,13 +142,17 @@ export const RegisterPatientModal = ({ doctors, onClose, onSuccess }: {
         startTransition(async () => {
             const res = await createMasshaPatient({ ...form });
             if (res.success && res.customId && res.patientId) {
+                const warnings: string[] = res.warning ? [res.warning] : [];
                 for (const doc of docFiles) {
                     const fd = new FormData();
                     fd.append("file", doc.file);
                     fd.append("patientId", res.patientId);
                     fd.append("type", doc.type);
-                    await uploadMasshaDocument(fd).catch(() => null);
+                    const upload = await uploadMasshaDocument(fd).catch(() => ({ success: false, error: "Upload failed", warning: undefined }));
+                    if (!upload.success) warnings.push(`${doc.file.name}: ${upload.error}`);
+                    else if (upload.warning) warnings.push(`${doc.file.name}: ${upload.warning}`);
                 }
+                if (warnings.length) alert(`Patient registered. ${warnings.join("\n")}`);
                 onSuccess(res.customId, form.name.trim());
             } else {
                 setError(res.error ?? "Registration failed.");
@@ -325,6 +329,7 @@ export const UpdateExistingPatientModal = ({ patients, onClose, onSuccess }: {
         setError("");
         startTransition(async () => {
             let uploaded = 0;
+            const warnings: string[] = [];
             for (let i = 0; i < files.length; i++) {
                 setProgress(`Uploading document ${i + 1} of ${files.length}...`);
                 const fd = new FormData();
@@ -332,10 +337,13 @@ export const UpdateExistingPatientModal = ({ patients, onClose, onSuccess }: {
                 fd.append("patientId", selectedPatientId);
                 fd.append("type", docType);
                 const res = await uploadMasshaDocument(fd);
-                if (res.success) uploaded++;
-                else console.error(`Error uploading ${files[i].name}:`, res.error);
+                if (res.success) {
+                    uploaded++;
+                    if (res.warning) warnings.push(`${files[i].name}: ${res.warning}`);
+                } else warnings.push(`${files[i].name}: ${res.error || "Upload failed"}`);
             }
             if (uploaded > 0) {
+                if (warnings.length) alert(warnings.join("\n"));
                 onSuccess();
             } else {
                 setError("Failed to upload files. Please try again.");

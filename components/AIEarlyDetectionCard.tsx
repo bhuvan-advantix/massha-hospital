@@ -53,14 +53,16 @@ function getDiseaseShortName(flag: EarlyRiskFlag): string {
 
 export default function AIEarlyDetectionCard({ data, patientName = "Patient", isDoctorView = false }: Props) {
     const [isExpanded, setIsExpanded] = useState(true);
-    const [selectedFlag, setSelectedFlag] = useState<EarlyRiskFlag | null>(data.detectedRisks[0] || null);
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const selectedFlag = data.detectedRisks.find(flag => flag.id === selectedId) || data.detectedRisks[0] || null;
 
     const hasRisks = data.detectedRisks.length > 0;
     const isCritical = data.overallRiskLevel === 'Critical Alert';
     const isElevated = data.overallRiskLevel === 'Elevated Risk';
     const isModerate = data.overallRiskLevel === 'Moderate Watch';
 
-    const bannerCls = isCritical
+    const insufficient = data.overallRiskLevel === 'Insufficient data';
+    const bannerCls = insufficient ? 'bg-slate-50 border-slate-200 text-slate-700' : isCritical
         ? 'bg-red-50 border-red-200 text-red-900'
         : isElevated
         ? 'bg-orange-50 border-orange-200 text-orange-900'
@@ -68,7 +70,7 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
         ? 'bg-amber-50 border-amber-200 text-amber-900'
         : 'bg-emerald-50 border-emerald-200 text-emerald-900';
 
-    const bannerIconCls = isCritical ? 'bg-red-500' : isElevated ? 'bg-orange-500' : isModerate ? 'bg-amber-500' : 'bg-emerald-500';
+    const bannerIconCls = insufficient ? 'bg-slate-400' : isCritical ? 'bg-red-500' : isElevated ? 'bg-orange-500' : isModerate ? 'bg-amber-500' : 'bg-emerald-500';
 
     return (
         <div className="w-full font-sans">
@@ -88,7 +90,7 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
                             <span className="text-xs font-bold truncate">
                                 {hasRisks
                                     ? `Early indicators detected for: ${data.detectedRisks.map(r => getDiseaseShortName(r)).join(' · ')}`
-                                    : 'All health parameters within normal baseline — no early risk flags detected.'}
+                                    : data.summaryText}
                             </span>
                         </div>
                     </div>
@@ -124,20 +126,15 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
                                     <h3 className="text-base font-black text-white tracking-tight flex items-center gap-2">
                                         Niraiva AI — Early Disease Detection
                                         <span className="text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                            12-Month Analysis
                                         </span>
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-0.5">
-                                        Longitudinal biomarker screening for <span className="text-teal-300 font-semibold">{patientName}</span>
+                                        Report-based screening for <span className="text-teal-300 font-semibold">{patientName}</span>
                                     </p>
                                 </div>
                             </div>
 
                             <div className="flex items-center gap-3 z-10">
-                                <div className="text-right">
-                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Risk Score</p>
-                                    <p className="text-2xl font-black text-white font-mono leading-none">{data.riskScore}<span className="text-sm text-slate-400 font-bold">/100</span></p>
-                                </div>
                                 <div className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wide border ${
                                     isCritical ? 'bg-red-500/20 text-red-300 border-red-500/30' :
                                     isElevated ? 'bg-orange-500/20 text-orange-300 border-orange-500/30' :
@@ -151,11 +148,11 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
 
                         <div className="p-5 sm:p-6 space-y-5">
                             {!hasRisks ? (
-                                <div className="flex items-center gap-4 p-5 bg-emerald-50 rounded-2xl border border-emerald-100">
-                                    <CheckCircle2 className="w-8 h-8 text-emerald-500 shrink-0" />
+                                <div className={`flex items-center gap-4 p-5 rounded-2xl border ${insufficient ? "bg-slate-50 border-slate-200" : "bg-emerald-50 border-emerald-100"}`}>
+                                    {insufficient ? <Info className="w-8 h-8 text-slate-500 shrink-0" /> : <CheckCircle2 className="w-8 h-8 text-emerald-500 shrink-0" />}
                                     <div>
-                                        <p className="font-bold text-emerald-900 text-sm">Optimal Health Baseline</p>
-                                        <p className="text-xs text-emerald-700 mt-0.5">No abnormal patterns detected across all disease screening domains.</p>
+                                        <p className="font-bold text-emerald-900 text-sm">{data.overallRiskLevel}</p>
+                                        <p className="text-xs text-emerald-700 mt-0.5">{data.summaryText}</p>
                                     </div>
                                 </div>
                             ) : (
@@ -163,7 +160,7 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
                                     {/* ── Disease Summary Cards ── */}
                                     <div>
                                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-                                            Detected Early Risk Conditions — {data.detectedRisks.length} Found
+                                            Flagged Report Results — {data.detectedRisks.length} Found
                                         </p>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                             {data.detectedRisks.map((flag) => {
@@ -173,7 +170,7 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
                                                 return (
                                                     <button
                                                         key={flag.id}
-                                                        onClick={() => setSelectedFlag(flag)}
+                                                        onClick={() => setSelectedId(flag.id)}
                                                         className={`text-left p-4 rounded-2xl border-2 transition-all duration-200 ${
                                                             isSelected
                                                                 ? 'border-teal-500 bg-teal-50 shadow-sm shadow-teal-100'
@@ -239,7 +236,7 @@ export default function AIEarlyDetectionCard({ data, patientName = "Patient", is
                                                     {selectedFlag.trend1Year && (
                                                         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
                                                             <p className="text-[10px] font-black text-amber-700 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                                                <Clock className="w-3 h-3" /> 12-Month Trend
+                                                                <Clock className="w-3 h-3" /> Recorded Results
                                                             </p>
                                                             <p className="text-xs font-semibold text-amber-900">{selectedFlag.trend1Year}</p>
                                                         </div>
