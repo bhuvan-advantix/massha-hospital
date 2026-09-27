@@ -103,8 +103,8 @@ export default function LabReports({
         setDownloadingId(reportId);
         try {
             const report = reports.find(r => r.id === reportId);
-            if (report?.cloudinaryUrl) {
-                window.open(report.cloudinaryUrl, '_blank');
+            if (report?.id) {
+                window.open(`/api/report/${report.id}?mode=view`, '_blank');
             } else {
                 router.push(`/dashboard/lab-reports/${reportId}`);
             }

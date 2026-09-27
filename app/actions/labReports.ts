@@ -180,7 +180,10 @@ async function extractLabDataWithAI(buffer: Buffer): Promise<{
             parsedData.metadata = {};
         }
 
-        return parsedData;
+        return {
+            ...parsedData,
+            rawMarkdown: rawMarkdown || ""
+        };
 
     } catch (error) {
         console.error("AI Extraction Error:", error);
@@ -189,7 +192,7 @@ async function extractLabDataWithAI(buffer: Buffer): Promise<{
 }
 
 // Helper function to extract and store key health parameters
-async function extractAndStoreHealthParameters(
+export async function extractAndStoreHealthParameters(
     patientId: string,
     labReportId: string,
     testResults: TestResult[],

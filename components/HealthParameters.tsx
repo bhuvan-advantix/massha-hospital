@@ -13,6 +13,7 @@ import {
     ResponsiveContainer,
     Legend
 } from 'recharts';
+import Link from 'next/link';
 import {
     Activity,
     Droplets,
@@ -20,7 +21,8 @@ import {
     Heart,
     Calendar,
     FlaskConical,
-    Loader2
+    Loader2,
+    ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generateHealthParametersAnalysis } from '@/app/actions/healthParameters';
@@ -34,7 +36,17 @@ const KEY_PARAMS = ['glucose', 'cholesterol', 'pressure', 'hba1c'];
 const isExcluded = (paramName: string) =>
     EXCLUDED_PARAMS.some(ex => paramName.toLowerCase().includes(ex));
 
-export default function HealthParameters({ history, analyses }: { history: any[], analyses: Record<string, string> }) {
+export default function HealthParameters({
+    history,
+    analyses,
+    highlightParam,
+    patientUserId
+}: {
+    history: any[];
+    analyses: Record<string, string>;
+    highlightParam?: string;
+    patientUserId?: string;
+}) {
     const [analyzingIds, setAnalyzingIds] = useState<Record<string, boolean>>({});
     const [localAnalyses, setLocalAnalyses] = useState<Record<string, string>>({});
     const [visibleAnalyses, setVisibleAnalyses] = useState<Record<string, boolean>>({});
@@ -172,12 +184,21 @@ export default function HealthParameters({ history, analyses }: { history: any[]
 
     return (
         <div className="max-w-5xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
-            {/* Page Heading */}
-            <div className="px-1">
-                <h1 className="text-3xl sm:text-4xl font-black text-slate-900">
-                    Health <span className="text-teal-600">Parameters</span>
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-500 mt-1">Track and analyze your health metrics over time</p>
+            {/* Page Heading & Back Navigation */}
+            <div className="px-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h1 className="text-3xl sm:text-4xl font-black text-slate-900">
+                        Health <span className="text-teal-600">Parameters</span>
+                    </h1>
+                    <p className="text-xs sm:text-sm text-slate-500 mt-1">Track and analyze your health metrics over time</p>
+                </div>
+                <Link
+                    href={patientUserId ? `/dashboard?patientUserId=${patientUserId}` : '/dashboard'}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-sm transition-colors self-start sm:self-auto"
+                >
+                    <ArrowLeft className="w-4 h-4 text-slate-500" />
+                    Back to Dashboard
+                </Link>
             </div>
 
             {/* Visual Progress Bar Chart */}
@@ -484,13 +505,27 @@ export default function HealthParameters({ history, analyses }: { history: any[]
                                         }
 
                                         const isAbnormal = statusValue.includes('high') || statusValue.includes('low') || statusValue.includes('critical');
-                                        // If it's not abnormal and we have a status (which we forced), it's green.
+                                        const isHighlighted = !!highlightParam && record.parameterName?.toLowerCase().includes(highlightParam.toLowerCase());
 
                                         return (
-                                            <div key={idx} className="bg-slate-50 rounded-lg sm:rounded-xl p-3 h-full flex flex-col justify-between hover:bg-slate-100 transition-colors">
-                                                <div className="flex items-center gap-1.5 mb-2 text-slate-500 text-[10px] sm:text-xs font-medium">
-                                                    {getParamIcon(record.parameterName)}
-                                                    <span className="truncate" title={record.parameterName}>{record.parameterName}</span>
+                                            <div
+                                                key={idx}
+                                                className={`rounded-lg sm:rounded-xl p-3 h-full flex flex-col justify-between transition-all ${
+                                                    isHighlighted
+                                                        ? 'bg-teal-50/80 border-2 border-teal-500 shadow-sm ring-2 ring-teal-200'
+                                                        : 'bg-slate-50 border border-slate-100 hover:bg-slate-100'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between gap-1.5 mb-2 text-slate-500 text-[10px] sm:text-xs font-medium">
+                                                    <div className="flex items-center gap-1.5 truncate">
+                                                        {getParamIcon(record.parameterName)}
+                                                        <span className={`truncate ${isHighlighted ? 'font-black text-teal-900' : ''}`} title={record.parameterName}>{record.parameterName}</span>
+                                                    </div>
+                                                    {isHighlighted && (
+                                                        <span className="shrink-0 text-[8px] font-black uppercase bg-teal-600 text-white px-1.5 py-0.5 rounded-full">
+                                                            Selected
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div className="flex items-baseline gap-1 mt-auto">
                                                     <span className={`text-base sm:text-lg font-black ${isAbnormal ? 'text-red-600' : 'text-emerald-600'
@@ -499,7 +534,7 @@ export default function HealthParameters({ history, analyses }: { history: any[]
                                                     </span>
                                                     <span className="text-[10px] text-slate-400 font-medium">{unit}</span>
                                                 </div>
-                                                {/* Status Badge - Always Show Since We Default to Normal */}
+                                                {/* Status Badge */}
                                                 <div className={`mt-1 text-[9px] font-bold uppercase tracking-wider ${isAbnormal ? 'text-red-500' : 'text-emerald-500'}`}>
                                                     {statusValue}
                                                 </div>

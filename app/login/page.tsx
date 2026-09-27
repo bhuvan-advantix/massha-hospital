@@ -136,7 +136,7 @@ function LoginContent() {
                 </Link>
 
                 <h2 className="text-3xl font-extrabold tracking-tight text-slate-900">
-                    {selectedRole ? (selectedRole === 'patient' ? 'Patient Portal' : 'Doctor Portal') : 'Welcome Back'}
+                    {selectedRole ? (selectedRole === 'patient' ? 'Hospital Admin Portal' : 'Doctor Portal') : 'Welcome Back'}
                 </h2>
                 <p className="mt-2 text-sm text-slate-500">
                     {selectedRole
@@ -167,8 +167,8 @@ function LoginContent() {
                                     />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-slate-800 text-xl group-hover:text-primary transition-colors">I am a Patient</h3>
-                                    <p className="text-sm text-slate-500 mt-1 font-medium">Access records, appointments & more</p>
+                                    <h3 className="font-bold text-slate-800 text-xl group-hover:text-primary transition-colors">I am a Hospital Admin</h3>
+                                    <p className="text-sm text-slate-500 mt-1 font-medium">Upload patients, manage clinical records</p>
                                 </div>
                                 <div className="ml-auto opacity-100 translate-x-0 sm:opacity-0 sm:translate-x-[-10px] sm:group-hover:opacity-100 sm:group-hover:translate-x-0 transition-all transform text-primary">
                                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

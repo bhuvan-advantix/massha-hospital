@@ -205,7 +205,7 @@ export function analyzePatientEarlyDetection(patientData: {
 
     // Determine Overall Risk Level & Score
     let overallRiskLevel: EarlyDetectionResult['overallRiskLevel'] = 'Normal Baseline';
-    let riskScore = 15;
+    let riskScore = 0;
 
     if (detectedRisks.some(r => r.severity === 'Critical')) {
         overallRiskLevel = 'Critical Alert';

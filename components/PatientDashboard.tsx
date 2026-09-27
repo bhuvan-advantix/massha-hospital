@@ -48,7 +48,10 @@ import {
     Edit2,
     Calendar,
     ArrowUpRight,
-    Download
+    Download,
+    UserPlus,
+    Users,
+    RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import HelpSupportView from '@/components/HelpSupportView';
@@ -58,6 +61,14 @@ import Footer from '@/components/Footer';
 import { buildOncologyBrief } from '@/lib/oncologyDemo';
 import AIEarlyDetectionCard from '@/components/AIEarlyDetectionCard';
 import { analyzePatientEarlyDetection } from '@/lib/aiEarlyDetection';
+import {
+    RegisterPatientModal,
+    PatientIdCard,
+    UpdateExistingPatientModal,
+    SwitchPatientModal,
+    MToast,
+} from '@/components/massha/MasshaModals';
+import { getMasshaDashboardData, type MasshaPatient, type MasshaDoctor } from '@/app/actions/massha';
 
 // --- Dashboard Components ---
 
@@ -916,66 +927,92 @@ const CompactFolderCard = ({
 // --- Main Section Component ---
 interface DiagnosticReportsSectionProps {
     reports: any[];
+    userId?: string;
+    isSwitchedPatient?: boolean;
 }
 
-function DiagnosticReportsSection({ reports }: DiagnosticReportsSectionProps) {
-    // Placeholder images for the folder effect
+function DiagnosticReportsSection({ reports, userId, isSwitchedPatient }: DiagnosticReportsSectionProps) {
     const defaultImages = [
         "https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?auto=format&fit=crop&q=80&w=200",
         "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=200",
         "https://images.unsplash.com/photo-1579154204601-01588f351e67?auto=format&fit=crop&q=80&w=200",
     ];
 
-    if (!reports || reports.length === 0) {
-        return (
-            <div className="space-y-6">
-                <h2 className="text-xl font-bold text-slate-900">Diagnostic Reports</h2>
+    const reportsLink = userId ? `/labreports?patientUserId=${userId}` : '/labreports';
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-bold text-slate-900">Clinical Lab Reports</h2>
+                    {reports && reports.length > 0 && (
+                        <span className="text-xs font-bold text-teal-600 bg-teal-50 border border-teal-100 px-3 py-1 rounded-full">
+                            {reports.length} report{reports.length !== 1 ? "s" : ""}
+                        </span>
+                    )}
+                </div>
+                <Link
+                    href={reportsLink}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-xl transition-colors border border-teal-200 shadow-sm"
+                >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>View All Lab Reports &rarr;</span>
+                </Link>
+            </div>
+
+            {!reports || reports.length === 0 ? (
                 <div className="bg-white rounded-2xl p-8 border border-slate-100 text-center">
                     <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
                         <FileText className="w-8 h-8 text-slate-300" />
                     </div>
-                    <h3 className="text-lg font-bold text-slate-900">No Reports Yet</h3>
-                    <p className="text-slate-500 text-sm mt-1">Uploaded lab reports will appear here as folders.</p>
+                    <h3 className="text-lg font-bold text-slate-900">No Lab Reports Yet</h3>
+                    <p className="text-slate-500 text-sm mt-1">Uploaded lab reports will appear here.</p>
                 </div>
-            </div>
-        );
-    }
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {reports.map((report, idx) => {
+                        let dateStr = "Unknown Date";
+                        if (report.reportDate) {
+                            try {
+                                const d = new Date(report.reportDate);
+                                if (!isNaN(d.getTime())) {
+                                    dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                                } else {
+                                    dateStr = report.reportDate;
+                                }
+                            } catch { dateStr = report.reportDate; }
+                        } else if (report.uploadedAt) {
+                            const d = new Date(report.uploadedAt);
+                            dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                        }
 
-    return (
-        <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">Diagnostic Reports</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {reports.map((report, idx) => {
-                    // Try to format date nicely
-                    let dateStr = "Unknown Date";
-                    if (report.reportDate) {
-                        try {
-                            const d = new Date(report.reportDate);
-                            // check if valid
-                            if (!isNaN(d.getTime())) {
-                                dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                            } else {
-                                dateStr = report.reportDate;
-                            }
-                        } catch (e) { dateStr = report.reportDate }
-                    } else if (report.uploadedAt) {
-                        const d = new Date(report.uploadedAt);
-                        dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                    }
+                        const targetHref = `/api/report/${report.id}?mode=view`;
 
-                    return (
-                        <CompactFolderCard
-                            key={report.id || idx}
-                            title={report.fileName || "Lab Report"}
-                            hospital={report.labName || "Medical Center"}
-                            date={dateStr}
-                            images={defaultImages} // Visual decoration
-                            href={`/labreports/${report.id}`}
-                            className="w-full"
-                        />
-                    );
-                })}
-            </div>
+                        return (
+                            <div key={report.id || idx} className="relative w-full group">
+                                <CompactFolderCard
+                                    title={report.fileName || "Lab Report"}
+                                    hospital={report.labName || "Diagnostic Lab"}
+                                    date={dateStr}
+                                    images={defaultImages}
+                                    href={targetHref}
+                                    className="w-full pr-12"
+                                    theme="teal"
+                                />
+                                <a
+                                    href={`/api/report/${report.id}?mode=download`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 shrink-0 p-2 text-slate-400 hover:bg-teal-50 hover:text-teal-600 rounded-lg transition-colors z-10"
+                                    title="Download PDF"
+                                >
+                                    <Download className="w-5 h-5" />
+                                </a>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }
@@ -1018,6 +1055,8 @@ interface DashboardProps {
             cloudinaryUrl: string;
             prescribedAt: string | null;
         }>;
+        isSwitchedPatient?: boolean;
+        sessionUserId?: string;
     }
 }
 
@@ -1256,13 +1295,31 @@ const AddMedicationModal = ({ patientId, onClose, initialData }: { patientId: st
 };
 
 export default function PatientDashboard({ data }: DashboardProps) {
-    const { user, patient, healthParameters = {}, doctorNotes: propDoctorNotes = [], diagnosticConditions = [], upcomingAppointments = [], prescriptions = [] } = data;
+    const { user, patient, healthParameters = {}, doctorNotes: propDoctorNotes = [], diagnosticConditions = [], upcomingAppointments = [], prescriptions = [], isSwitchedPatient = false, sessionUserId } = data;
     const router = useRouter();
     const [currentView, setCurrentView] = useState('dashboard');
     const [expandedNote, setExpandedNote] = useState<string | null>(null);
     const [showWelcome, setShowWelcome] = useState(false);
     const [showAddMedication, setShowAddMedication] = useState(false);
     const [editingMed, setEditingMed] = useState<any>(null);
+
+    // ─── Hospital Admin Modal State ──────────────────────────────────────────
+    const [showRegister, setShowRegister] = useState(false);
+    const [showUpdatePatient, setShowUpdatePatient] = useState(false);
+    const [showSwitchPatient, setShowSwitchPatient] = useState(false);
+    const [patientIdCard, setPatientIdCard] = useState<{ customId: string; patientName: string } | null>(null);
+    const [adminToast, setAdminToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [masshaPatients, setMasshaPatients] = useState<MasshaPatient[]>([]);
+    const [masshaDoctors, setMasshaDoctors] = useState<MasshaDoctor[]>([]);
+
+    useEffect(() => {
+        getMasshaDashboardData().then(res => {
+            if (res.success) {
+                setMasshaPatients(res.patients ?? []);
+                setMasshaDoctors(res.doctors ?? []);
+            }
+        });
+    }, []);
 
     // Handle voice command ?section= param (from VoiceMic navigation)
     useEffect(() => {
@@ -1288,7 +1345,13 @@ export default function PatientDashboard({ data }: DashboardProps) {
     }, []);
 
     // Lab Reports State
-    const [labReportsData, setLabReportsData] = useState<any[]>([]);
+    const [labReportsData, setLabReportsData] = useState<any[]>(patient?.reports || []);
+
+    useEffect(() => {
+        if (patient?.reports) {
+            setLabReportsData(patient.reports);
+        }
+    }, [patient?.reports]);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState('');
 
@@ -1555,6 +1618,25 @@ export default function PatientDashboard({ data }: DashboardProps) {
 
             <main className="flex-grow pt-28 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full space-y-8">
 
+                {/* Switched Patient Banner */}
+                {isSwitchedPatient && currentView === 'dashboard' && (
+                    <div className="flex items-center justify-between bg-amber-50 border-2 border-amber-200 rounded-2xl px-5 py-3">
+                        <div className="flex items-center gap-3">
+                            <Users className="w-5 h-5 text-amber-600 shrink-0" />
+                            <div>
+                                <p className="text-sm font-black text-amber-800">Viewing patient: {user.name}</p>
+                                <p className="text-xs text-amber-600 font-medium">You are currently inspecting another patient profile</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => router.push('/dashboard')}
+                            className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl transition-colors shadow-sm"
+                        >
+                            <RefreshCw className="w-3.5 h-3.5" /> Back to My Dashboard
+                        </button>
+                    </div>
+                )}
+
                 {/* Header */}
                 {currentView === 'dashboard' && (
                     <motion.div
@@ -1567,7 +1649,29 @@ export default function PatientDashboard({ data }: DashboardProps) {
                             <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight pb-1">
                                 Health <span className="text-teal-600">Dashboard</span>
                             </h1>
-                            <p className="text-slate-500 font-medium mt-1">View and manage your health information</p>
+                            <p className="text-slate-500 font-medium mt-1">View and manage clinical records and health parameters</p>
+                        </div>
+
+                        {/* Admin Action Buttons */}
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <button
+                                onClick={() => setShowSwitchPatient(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 border-2 border-slate-200 hover:border-slate-300 bg-white text-slate-700 text-xs font-black rounded-xl transition-colors shadow-sm cursor-pointer"
+                            >
+                                <Users className="w-4 h-4 text-slate-500" /> Switch Patient
+                            </button>
+                            <button
+                                onClick={() => setShowUpdatePatient(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 border-2 border-slate-200 hover:border-slate-300 bg-white text-slate-700 text-xs font-black rounded-xl transition-colors shadow-sm cursor-pointer"
+                            >
+                                <UploadCloud className="w-4 h-4 text-blue-600" /> Update Existing Patient
+                            </button>
+                            <button
+                                onClick={() => setShowRegister(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-black rounded-xl transition-colors shadow-lg shadow-teal-100 cursor-pointer"
+                            >
+                                <UserPlus className="w-4 h-4" /> Register New Patient
+                            </button>
                         </div>
                     </motion.div>
                 )}
@@ -1626,19 +1730,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                 });
                             }
 
-                            const defaults = [
-                                { title: 'Blood Pressure', value: '122/76', unit: 'mmHg', status: 'Normal' },
-                                { title: 'Blood Glucose', value: '94', unit: 'mg/dL', status: 'Normal' },
-                                { title: 'HbA1c', value: '5.6', unit: '%', status: 'Normal' },
-                                { title: 'Total Cholesterol', value: '176', unit: 'mg/dL', status: 'Normal' }
-                            ];
-
-                            defaults.forEach(d => {
-                                if (!addedNames.has(d.title.toLowerCase())) {
-                                    addedNames.add(d.title.toLowerCase());
-                                    cardPool.push(d);
-                                }
-                            });
+                            // Only real biomarkers from database - NO hardcoded fake numbers
 
                             const abnormal = cardPool.filter(c => {
                                 const s = (c.status || '').toLowerCase();
@@ -1656,7 +1748,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                             <p className="text-xs text-slate-500 font-medium">Routine metabolic, tumor biomarker and lipid tracking</p>
                                         </div>
                                         <Link
-                                            href="/dashboard/health"
+                                            href={user?.id ? `/dashboard/health?patientUserId=${user.id}` : '/dashboard/health'}
                                             className="hidden sm:flex items-center gap-1.5 text-sm font-bold text-teal-600 hover:text-teal-700 transition-colors"
                                         >
                                             View All Details
@@ -1664,8 +1756,13 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                         </Link>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                                        {finalCards.map(card => (
-                                            <Link key={card.title} href={`/dashboard/health?param=${encodeURIComponent(card.title)}`}>
+                                        {finalCards.map(card => {
+                                            const cardHref = user?.id
+                                                ? `/dashboard/health?param=${encodeURIComponent(card.title)}&patientUserId=${user.id}`
+                                                : `/dashboard/health?param=${encodeURIComponent(card.title)}`;
+
+                                            return (
+                                                <Link key={card.title} href={cardHref}>
                                                 <HealthMetricCard
                                                     title={card.title}
                                                     value={card.value}
@@ -1674,7 +1771,8 @@ export default function PatientDashboard({ data }: DashboardProps) {
                                                     date={card.date}
                                                 />
                                             </Link>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </motion.div>
                             );
@@ -2094,6 +2192,14 @@ export default function PatientDashboard({ data }: DashboardProps) {
                             </motion.div>
                         </div>
 
+                        {/* Clinical Lab Reports */}
+                        <motion.div variants={itemVariants}>
+                            <DiagnosticReportsSection
+                                reports={(patient?.reports as any[]) || []}
+                                userId={user?.id}
+                                isSwitchedPatient={isSwitchedPatient}
+                            />
+                        </motion.div>
 
                         {/* Prescriptions */}
                         <motion.div variants={itemVariants} className="space-y-4">
@@ -2171,32 +2277,7 @@ export default function PatientDashboard({ data }: DashboardProps) {
                             )}
                         </motion.div>
 
-                        {/* Chronic Conditions */}
-                        <motion.div variants={itemVariants} className="space-y-6">
-                            <h2 className="text-xl font-bold text-slate-900">Chronic Conditions</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                {diagnosticConditions.length > 0 ? (
-                                    diagnosticConditions.map((condition) => (
-                                        <ConditionCard
-                                            key={condition.id}
-                                            href={`/diagnostic/${condition.id}`}
-                                            name={condition.conditionName}
-                                            diagnosed={condition.createdAt ? new Date(condition.createdAt).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : "-"}
-                                            status={condition.conditionStatus.charAt(0).toUpperCase() + condition.conditionStatus.slice(1)}
-                                        />
-                                    ))
-                                ) : (
-                                    <div className="col-span-full">
-                                        <p className="text-slate-500 italic">No chronic conditions recorded</p>
-                                    </div>
-                                )}
-                            </div>
-                        </motion.div>
 
-                        {/* Diagnostic Reports */}
-                        <motion.div variants={itemVariants}>
-                            <DiagnosticReportsSection reports={(patient?.reports as any[]) || []} />
-                        </motion.div>
 
                     </motion.div>
                 )}
@@ -2322,6 +2403,62 @@ export default function PatientDashboard({ data }: DashboardProps) {
 
             {/* Footer */}
             <Footer />
+
+            {/* ─── Hospital Admin Modals ────────────────────────────────────── */}
+            {adminToast && (
+                <MToast
+                    message={adminToast.message}
+                    type={adminToast.type}
+                    onDone={() => setAdminToast(null)}
+                />
+            )}
+
+            {showRegister && (
+                <RegisterPatientModal
+                    doctors={masshaDoctors}
+                    onClose={() => setShowRegister(false)}
+                    onSuccess={(customId, patientName) => {
+                        setShowRegister(false);
+                        setPatientIdCard({ customId, patientName });
+                        getMasshaDashboardData().then(res => {
+                            if (res.success && res.patients) setMasshaPatients(res.patients);
+                        });
+                    }}
+                />
+            )}
+
+            {patientIdCard && (
+                <PatientIdCard
+                    customId={patientIdCard.customId}
+                    patientName={patientIdCard.patientName}
+                    onClose={() => setPatientIdCard(null)}
+                />
+            )}
+
+            {showUpdatePatient && (
+                <UpdateExistingPatientModal
+                    patients={masshaPatients}
+                    onClose={() => setShowUpdatePatient(false)}
+                    onSuccess={() => {
+                        setShowUpdatePatient(false);
+                        setAdminToast({ message: "Patient records updated successfully!", type: "success" });
+                        getMasshaDashboardData().then(res => {
+                            if (res.success && res.patients) setMasshaPatients(res.patients);
+                        });
+                    }}
+                />
+            )}
+
+            {showSwitchPatient && (
+                <SwitchPatientModal
+                    currentUserId={user?.id}
+                    onClose={() => setShowSwitchPatient(false)}
+                    onSwitch={(patientUserId) => {
+                        setShowSwitchPatient(false);
+                        window.location.href = `/dashboard?patientUserId=${patientUserId}`;
+                    }}
+                />
+            )}
         </div>
     );
 }

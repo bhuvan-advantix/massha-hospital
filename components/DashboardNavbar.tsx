@@ -68,10 +68,10 @@ export default function DashboardNavbar({ user }: DashboardNavbarProps) {
         return () => window.removeEventListener('scroll', controlNavbar);
     }, [lastScrollY]);
 
+    const dashboardHref = user?.id ? `/dashboard?patientUserId=${user.id}` : '/dashboard';
+
     const navLinks = [
-        { name: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-        { name: 'Timeline', href: '/timeline', icon: <Clock className="w-4 h-4" /> },
-        { name: 'Diagnostic', href: '/diagnostic', icon: <Stethoscope className="w-4 h-4" /> },
+        { name: 'Dashboard', href: dashboardHref, icon: <LayoutDashboard className="w-4 h-4" /> },
     ];
 
     return (
@@ -80,7 +80,7 @@ export default function DashboardNavbar({ user }: DashboardNavbarProps) {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center h-20">
                         {/* Logo */}
-                        <Link href="/dashboard" className="flex-shrink-0 flex items-center gap-2 group cursor-pointer">
+                        <Link href={dashboardHref} className="flex-shrink-0 flex items-center gap-2 group cursor-pointer">
                             <div className="relative w-9 h-9 rounded-xl overflow-hidden shadow-sm shrink-0">
                                 <Image
                                     src="/Nrivaa Logo.jpeg"

@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import {
     patients, doctors, users, labReports, prescriptions,
-    timelineEvents, doctorPatientRelations,
+    timelineEvents, doctorPatientRelations, healthParameters,
 } from "@/db/schema";
 import { eq, desc, like } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -592,6 +592,7 @@ export async function uploadMasshaDocument(formData: FormData): Promise<{
             });
 
             revalidatePath("/massha");
+            revalidatePath("/dashboard");
             return { success: true, recordId: rx.id };
         } else {
             const [report] = await db
@@ -627,6 +628,7 @@ export async function uploadMasshaDocument(formData: FormData): Promise<{
             });
 
             revalidatePath("/massha");
+            revalidatePath("/dashboard");
             return { success: true, recordId: report.id };
         }
     } catch (err: any) {
@@ -711,6 +713,7 @@ export async function deleteMasshaPatient(
         }
 
         // Delete from DB (cascade should handle child rows, but do explicitly)
+        await db.delete(healthParameters).where(eq(healthParameters.patientId, patientId)).catch(() => null);
         await db.delete(labReports).where(eq(labReports.patientId, patientId));
         await db.delete(prescriptions).where(eq(prescriptions.patientId, patientId));
         await db.delete(doctorPatientRelations).where(eq(doctorPatientRelations.patientId, patientId));
@@ -719,6 +722,7 @@ export async function deleteMasshaPatient(
         await db.delete(users).where(eq(users.id, p.userId));
 
         revalidatePath("/massha");
+        revalidatePath("/dashboard");
         return { success: true };
     } catch (err: any) {
         console.error("deleteMasshaPatient error:", err);

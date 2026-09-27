@@ -4,35 +4,87 @@ import { redirect } from "next/navigation";
 import { db, ensureLabReportsSchema, ensureMedicationsSchema } from "@/db";
 import { users, patients, medications, labReports, timelineEvents, doctors, patientDiagnostics } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
-import PatientDashboard from '@/components/PatientDashboard';
-import { getLatestHealthParameters } from '@/app/actions/labReports';
-import { autoStopExpiredMedications } from '@/app/actions/medications';
-import { getPrescriptionsForPatient } from '@/app/actions/consultation';
+import PatientDashboard from "@/components/PatientDashboard";
+import { getLatestHealthParameters } from "@/app/actions/labReports";
+import { autoStopExpiredMedications } from "@/app/actions/medications";
+import { getPrescriptionsForPatient } from "@/app/actions/consultation";
 
-export default async function DashboardPage() {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage({
+    searchParams,
+}: {
+    searchParams?: Promise<{ patientUserId?: string }> | { patientUserId?: string };
+}) {
     const session = await getServerSession(authOptions);
 
     if (!session || !session.user) {
         redirect("/login");
     }
 
-    const userId = session.user.id;
+    const sessionUserId = session.user.id;
 
-    // Fetch User and Patient details
-    const [userData] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    // Verify session user exists and is onboarded
+    const [sessionUserData] = await db.select().from(users).where(eq(users.id, sessionUserId)).limit(1);
 
-    if (!userData) {
+    if (!sessionUserData) {
         redirect("/login");
     }
 
-    if (!userData.isOnboarded) {
+    if (!sessionUserData.isOnboarded) {
         redirect("/onboarding");
     }
 
-    // For now, assume it's a patient. We can add a check for 'doctor' later.
+    // Resolve searchParams (supports Next.js 15 Promise or direct object)
+    const resolvedParams = searchParams instanceof Promise ? await searchParams : searchParams;
+    const requestedUserId = resolvedParams?.patientUserId;
+
+    // If requested a specific patient view, verify and load their account
+    let targetUserData = sessionUserData;
+    let isSwitchedPatient = false;
+
+    if (requestedUserId) {
+        const [foundUser] = await db.select().from(users).where(eq(users.id, requestedUserId)).limit(1);
+        if (foundUser) {
+            targetUserData = foundUser;
+            if (foundUser.id !== sessionUserId) {
+                isSwitchedPatient = true;
+            }
+        }
+    } else {
+        // If no patientUserId provided in URL:
+        // Check if session user is an admin/doctor or has no active clinical records.
+        // In that case, fallback to the latest registered patient so they immediately see live data.
+        const isAdminOrDoc = sessionUserData.role === 'admin' || sessionUserData.role === 'doctor' || sessionUserData.email?.includes('admin') || sessionUserData.customId?.includes('ADMIN');
+
+        let [selfPatient] = await db.select().from(patients).where(eq(patients.userId, sessionUserId)).limit(1);
+        let hasActiveRecords = false;
+
+        if (selfPatient && !isAdminOrDoc) {
+            const [report] = await db.select().from(labReports).where(eq(labReports.patientId, selfPatient.id)).limit(1);
+            if (report || selfPatient.age || selfPatient.gender || selfPatient.chronicConditions) {
+                hasActiveRecords = true;
+            }
+        }
+
+        if (!hasActiveRecords || isAdminOrDoc) {
+            // Find most recent active patient
+            const allPatients = await db.select().from(patients).orderBy(desc(patients.createdAt));
+            const activePatient = allPatients.find(p => p.userId !== sessionUserId && (p.age || p.gender || p.chronicConditions)) || allPatients.find(p => p.userId !== sessionUserId) || allPatients[0];
+
+            if (activePatient && activePatient.userId !== sessionUserId) {
+                const [activeUser] = await db.select().from(users).where(eq(users.id, activePatient.userId)).limit(1);
+                if (activeUser) {
+                    targetUserData = activeUser;
+                    isSwitchedPatient = true;
+                }
+            }
+        }
+    }
+
+    const userId = targetUserData.id;
     const [patientData] = await db.select().from(patients).where(eq(patients.userId, userId)).limit(1);
 
-    // Fetch Medications if patient exists
     let patientMedications: any[] = [];
     let patientReports: any[] = [];
     let healthParams: Record<string, any> = {};
@@ -44,11 +96,9 @@ export default async function DashboardPage() {
     if (patientData) {
         await ensureLabReportsSchema();
         await ensureMedicationsSchema();
-        // Auto-stop any medications whose duration has elapsed
         await autoStopExpiredMedications(patientData.id);
         patientMedications = await db.select().from(medications).where(eq(medications.patientId, patientData.id));
 
-        // Fetch this patient's diagnostic conditions (set by doctor on Diagnostic page)
         const diagnosticRows = await db
             .select({
                 id: patientDiagnostics.id,
@@ -65,12 +115,13 @@ export default async function DashboardPage() {
         diagnosticConditions = diagnosticRows.map(r => ({
             id: r.id,
             conditionName: r.conditionName,
-            conditionStatus: r.conditionStatus ?? 'stable',
+            conditionStatus: r.conditionStatus ?? "stable",
             clinicalNotes: r.clinicalNotes ?? null,
             treatmentPlan: r.treatmentPlan ?? null,
             nodes: (r.nodes as unknown[]) ?? [],
             createdAt: r.createdAt?.toISOString() ?? null,
         }));
+
         patientReports = await db.query.labReports.findMany({
             where: eq(labReports.patientId, patientData.id),
             orderBy: (reports, { desc }) => [desc(reports.uploadedAt)],
@@ -85,40 +136,37 @@ export default async function DashboardPage() {
                 extractedData: true,
                 fileSize: true,
                 pageCount: true,
-                uploadedAt: true
+                uploadedAt: true,
+                cloudinaryUrl: true,
             }
         });
 
-        // Fetch latest health parameters
         const healthParamsResult = await getLatestHealthParameters(userId);
         if (healthParamsResult.success && healthParamsResult.parameters) {
             healthParams = healthParamsResult.parameters;
         }
 
-        // Fetch patient-visible doctor notes from timeline events (created by doctor, type=appointment, status=completed)
         const doctorEvents = await db.select()
             .from(timelineEvents)
             .where(and(
                 eq(timelineEvents.userId, userId),
-                eq(timelineEvents.createdBy, 'doctor'),
-                eq(timelineEvents.eventType, 'appointment'),
-                eq(timelineEvents.status, 'completed')
+                eq(timelineEvents.createdBy, "doctor"),
+                eq(timelineEvents.eventType, "appointment"),
+                eq(timelineEvents.status, "completed")
             ))
             .orderBy(desc(timelineEvents.createdAt))
             .limit(10);
 
-        // Fetch staff-scheduled upcoming appointments (visible to patient)
         const staffAppointments = await db.select()
             .from(timelineEvents)
             .where(and(
                 eq(timelineEvents.userId, userId),
-                eq(timelineEvents.createdBy, 'staff'),
-                eq(timelineEvents.eventType, 'appointment')
+                eq(timelineEvents.createdBy, "staff"),
+                eq(timelineEvents.eventType, "appointment")
             ))
             .orderBy(desc(timelineEvents.eventDate))
             .limit(20);
 
-        // For each event, try to get the doctor's name
         const doctorIds = [...new Set(doctorEvents.map(e => e.doctorId).filter(Boolean))];
         const doctorRecords: Record<string, any> = {};
         for (const docId of doctorIds) {
@@ -128,8 +176,8 @@ export default async function DashboardPage() {
                     const [docUser] = await db.select().from(users).where(eq(users.id, doc.userId)).limit(1);
                     if (docUser) {
                         doctorRecords[docId] = {
-                            name: docUser.name || 'Doctor',
-                            specialty: doc.specialization || 'General Physician'
+                            name: docUser.name || "Doctor",
+                            specialty: doc.specialization || "General Physician"
                         };
                     }
                 }
@@ -141,25 +189,24 @@ export default async function DashboardPage() {
             doctorId: event.doctorId,
             doctorName: event.doctorId && doctorRecords[event.doctorId]
                 ? `Dr. ${doctorRecords[event.doctorId].name}`
-                : event.title.replace('Consultation with ', '').trim(),
+                : event.title.replace("Consultation with ", "").trim(),
             specialty: event.doctorId && doctorRecords[event.doctorId]
                 ? doctorRecords[event.doctorId].specialty
-                : 'General Physician',
+                : "General Physician",
             date: (() => {
-                if (!event.eventDate) return '';
+                if (!event.eventDate) return "";
                 try {
-                    return new Date(event.eventDate).toLocaleDateString('en-IN', {
-                        day: 'numeric', month: 'short', year: 'numeric'
+                    return new Date(event.eventDate).toLocaleDateString("en-IN", {
+                        day: "numeric", month: "short", year: "numeric"
                     });
                 } catch {
                     return event.eventDate;
                 }
             })(),
-            note: event.description || '',
+            note: event.description || "",
             createdAt: event.createdAt?.toISOString() || null,
         }));
 
-        // Map staff appointments for patient view
         upcomingAppointmentsForDashboard = staffAppointments.map(e => ({
             id: e.id,
             title: e.title,
@@ -168,7 +215,6 @@ export default async function DashboardPage() {
             description: e.description,
         }));
 
-        // Fetch prescriptions for this patient
         const prescriptionsResult = await getPrescriptionsForPatient(patientData.id);
         if (prescriptionsResult.success && prescriptionsResult.data) {
             patientPrescriptions = prescriptionsResult.data.map(p => ({
@@ -178,18 +224,16 @@ export default async function DashboardPage() {
         }
     }
 
-    // Prepare data object (serializing dates/etc if needed)
     const dashboardData = {
         user: {
-            id: userData.id,
-            name: userData.name || "User",
-            customId: userData.customId || "Pending",
-            email: userData.email,
-            image: userData.image || null,
+            id: targetUserData.id,
+            name: targetUserData.name || "User",
+            customId: targetUserData.customId || "Pending",
+            email: targetUserData.email,
+            image: targetUserData.image || null,
         },
         patient: patientData ? {
             ...patientData,
-            // Convert Date objects to strings for Client Component
             createdAt: patientData.createdAt?.toISOString() || null,
             medications: patientMedications.map(m => ({
                 ...m,
@@ -197,7 +241,7 @@ export default async function DashboardPage() {
             })),
             reports: patientReports.map(r => ({
                 ...r,
-                reportDate: r.reportDate ? r.reportDate.toString() : null, // Ensure string
+                reportDate: r.reportDate ? r.reportDate.toString() : null,
                 uploadedAt: r.uploadedAt?.toISOString() || null,
             }))
         } : null,
@@ -206,6 +250,8 @@ export default async function DashboardPage() {
         diagnosticConditions,
         upcomingAppointments: upcomingAppointmentsForDashboard,
         prescriptions: patientPrescriptions,
+        isSwitchedPatient,
+        sessionUserId,
     };
 
     return <PatientDashboard data={dashboardData} />;
